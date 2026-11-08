@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "apa": {
+      "command": "node",
+      "args": ["src/cli.mjs", "mcp"],
+      "cwd": "."
+    }
+  }
+}

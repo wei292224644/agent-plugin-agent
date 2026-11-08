@@ -1,0 +1,8 @@
+{
+  "name": "apa",
+  "displayName": "APA",
+  "version": "0.1.0",
+  "description": "把一块有边界的工作下放到另一家本地 Agent CLI，需要决定时用同一会话继续。",
+  "skills": "./skills/",
+  "mcpServers": "./.cursor-mcp.json"
+}
