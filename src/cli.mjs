@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { delegate, listAgents } from "./runner.mjs";
+import { delegate, listAgents, taskCancel, taskStatus } from "./runner.mjs";
 import { startMcp } from "./mcp.mjs";
 
 const usage = `用法:
   apa agents
   apa delegate --target <codex|claude|gemini|agy|cursor> [--prompt <text>] [--session <id>] [--timeout <seconds>] [--file <path>...]
+  apa status [--task <id>]
+  apa cancel [--task <id>]
   apa mcp
 
 没有 --prompt 时从 stdin 读取任务。
@@ -56,6 +58,11 @@ if (command === "mcp") {
     timeoutSeconds: args.timeout === true ? undefined : args.timeout,
     sessionId: args.session === true ? undefined : args.session,
   });
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+} else if (command === "status" || command === "cancel") {
+  const args = parseArgs(rest);
+  const taskId = args.task === true ? undefined : args.task;
+  const result = command === "status" ? taskStatus({ taskId }) : taskCancel({ taskId });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } else {
   process.stderr.write(usage);

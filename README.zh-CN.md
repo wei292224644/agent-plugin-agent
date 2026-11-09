@@ -26,6 +26,7 @@
   - [宿主内自动救援 (Rescue 技能)](#宿主内自动救援-rescue-技能)
   - [命令行直接调用 (CLI)](#命令行直接调用-cli)
   - [交互式决断与会话续接 (needs_decision)](#交互式决断与会话续接-needs_decision)
+  - [子 Agent 跑起来之后](#子-agent-跑起来之后)
 - [各平台底层调用规范](#各平台底层调用规范)
 - [安全机制与防死锁设计](#安全机制与防死锁设计)
 - [手工冒烟测试](#手工冒烟测试)
@@ -326,7 +327,7 @@ node src/cli.mjs agents
 > “把这个重构任务 rescue 给 Codex 做”  
 > “交给 Claude 跑一下测试并修复”
 
-宿主 Agent 会自动触发 `apa-rescue` 技能，通过 `delegate_task` MCP 工具把这块工作下发给指定目标，并在完成后向你呈现交付摘要与变更统计。
+宿主 Agent 会调用 `delegate_task`。这一次返回发生在子进程还活着的时候，而不是等任务做完。随后用 `task_status` 看进度和最终结果。
 
 **路由规则**：
 - 用户指定了目标（如“交给 codex”）：直接派给指定 Agent。
@@ -353,7 +354,11 @@ node src/cli.mjs delegate --target codex --prompt "重构 auth 逻辑并补全�
 # 4. 从标准输入 (stdin) 读取提示词
 cat prompt.txt | node src/cli.mjs delegate --target agy
 
-# 5. 启动标准 MCP 服务 (stdio 模式)
+# 5. 查看当前目录这一单，或停掉它
+node src/cli.mjs status
+node src/cli.mjs cancel
+
+# 6. 启动标准 MCP 服务 (stdio 模式)
 node src/cli.mjs mcp
 ```
 
@@ -372,6 +377,16 @@ node src/cli.mjs mcp
 - `success`: 任务成功。附带 `summary`、`session_id`、`git_changes`（修改文件数、增删行数）。
 - `needs_decision`: 目标 Agent 遇到了不确定的分支选择。返回包含 `question`、`options` 与 `session_id`。宿主会将问题和选项呈现给用户；得到用户选择后，**携带同一个 `session_id` 再次调用 `delegate_task`**，目标 Agent 即可在原上下文中继续推进。
 - `failed` / `timed_out` / `not_installed` / `not_authenticated` / `busy`: 异常或忙碌中断。附带错误摘要，宿主停止下发。
+- `cancelled`: 宿主用 `task_cancel` 停掉了这一单。
+
+### 子 Agent 跑起来之后
+
+`delegate_task` 先把子进程拉起来。进程还活着，才返回：
+
+- `status: "running"` 表示子 Agent 已经启动。返回里有 `task_id`、目标、已运行时长，以及已经打出来的输出。`session_id` 要等对方 CLI 自己打印出来才有。续接仍用 `session_id`，不用 `task_id`。
+- 进程马上退出（没登录、一启动就崩）时，同一次调用直接返回 `failed` 或 `not_authenticated`，不会说已经跑起来。
+- `task_status` 不占工作区的锁。进行中返回时长、最近输出和目前的 `git_changes`。结束后返回以前要干等才能拿到的最终结果（`success`、`needs_decision`、`failed`、`timed_out`）。
+- `task_cancel` 杀掉该进程并返回 `cancelled`。同一个工作区同时仍只有一个派工。
 
 ---
 

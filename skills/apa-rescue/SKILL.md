@@ -1,11 +1,11 @@
 ---
 name: apa-rescue
-description: Hands a bounded coding task to another local agent CLI through the apa MCP tool delegate_task. Use proactively when implementation, debugging, or a second pass should run in another agent environment, when the user says rescue or asks to hand work to Codex, Claude, Agy, or Cursor, and when a previous delegate_task returned needs_decision for the same session.
+description: Hands a bounded coding task to another local agent CLI through the apa MCP tools delegate_task, task_status, and task_cancel. Use proactively when implementation, debugging, or a second pass should run in another agent environment, when the user says rescue or asks to hand work to Codex, Claude, Agy, or Cursor, when delegate_task returns running, and when a previous task_status returned needs_decision for the same session.
 ---
 
 # APA Rescue
 
-把一块有边界的工作下放到另一家本地 CLI。调用 MCP 工具 `delegate_task`。不要自己拼 shell，也不要自己把这块做完。
+把一块有边界的工作下放到另一家本地 CLI。调用 MCP 工具 `delegate_task`。子 Agent 起来之后它会返回 `running`。再用 `task_status` 看进度和结果。不要自己拼 shell，也不要自己把这块做完。
 
 ## 什么时候下放
 
@@ -38,6 +38,8 @@ description: Hands a bounded coding task to another local agent CLI through the 
 
 ## 返回之后
 
-- `success`：把 `summary` 和 `git_changes` 告诉用户。不要在当前会话里重做这些修改。
+- `running`：子 Agent 已经起来。告诉用户派给了谁。用返回的 `task_id` 调用 `task_status` 看时长、最近输出和 `git_changes`。不要在当前会话里把活做掉。
+- `task_status` 得到 `success`：把 `summary` 和 `git_changes` 告诉用户。不要在当前会话里重做这些修改。
 - `needs_decision`：把 `question` 和 `options` 原样问用户。等回答。再用同一个 `session_id` 调用 `delegate_task`，`prompt` 只写用户的选择。不要替用户选，也不要新开一轮。
-- `failed`、`timed_out`、`not_installed`、`not_authenticated`、`busy`：转告 `summary`，然后停下。不要在当前会话里把活做掉。
+- 用户要停：调用 `task_cancel`，把结果告诉用户。
+- `failed`、`timed_out`、`not_installed`、`not_authenticated`、`busy`、`cancelled`：转告 `summary`，然后停下。不要在当前会话里把活做掉。
