@@ -1,80 +1,82 @@
 # APA (Agent-Plugin-Agent)
 
-> 本地去中心化 AI Agent 算力桥：**Any Agent as Host, Any Agent as Worker**。  
-> 当前使用的 CLI/IDE 作为主控（Host），通过统一的标准 MCP 工具把有边界的代码任务委派给本机安装的其他 Agent CLI（Worker），直接消耗对方订阅里的额度。运行器自动拼装合规参数与执行环境，模型无需拼接脆弱的 shell 命令。
+**English** | [简体中文](README.zh-CN.md)
 
-支持的目标平台：`claude` (Claude Code)、`agy` (Antigravity)、`codex` (Codex CLI / App)、`cursor` (Cursor Agent CLI / IDE)、`gemini` (Gemini CLI)。
+> Decentralized local AI Agent bridge: **Any Agent as Host, Any Agent as Worker**.  
+> Your current CLI or IDE acts as the Host, delegating bounded coding tasks to other installed local Agent CLIs (Workers) via a standard MCP tool, directly spending their respective subscription quotas. The runner assembles sanitized arguments and safe execution environments so models never have to string together fragile shell commands.
+
+Supported platforms: `claude` (Claude Code), `agy` (Antigravity), `codex` (Codex CLI / App), `cursor` (Cursor Agent CLI / IDE), and `gemini` (Gemini CLI).
 
 ---
 
-## 目录 (Table of Contents)
+## Table of Contents
 
-- [核心工作原理](#核心工作原理)
-- [安装指南 (Installation)](#安装指南-installation)
-  - [前置要求](#前置要求)
+- [How It Works](#how-it-works)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
   - [Claude Code](#claude-code)
   - [Antigravity (agy)](#antigravity-agy)
   - [Codex CLI](#codex-cli)
   - [Codex App](#codex-app)
-  - [Cursor (Agent CLI 与 IDE)](#cursor-agent-cli-与-ide)
+  - [Cursor (Agent CLI & IDE)](#cursor-agent-cli--ide)
   - [Gemini CLI](#gemini-cli)
-  - [通用 MCP 客户端 (Claude Desktop / Windsurf 等)](#通用-mcp-客户端-claude-desktop--windsurf-等)
-- [验证安装](#验证安装)
-- [使用方法与工作流](#使用方法与工作流)
-  - [宿主内自动救援 (Rescue 技能)](#宿主内自动救援-rescue-技能)
-  - [命令行直接调用 (CLI)](#命令行直接调用-cli)
-  - [交互式决断与会话续接 (needs_decision)](#交互式决断与会话续接-needs_decision)
-- [各平台底层调用规范](#各平台底层调用规范)
-- [安全机制与防死锁设计](#安全机制与防死锁设计)
-- [手工冒烟测试](#手工冒烟测试)
-- [开发与单元测试](#开发与单元测试)
+  - [Generic MCP Clients (Claude Desktop / Windsurf / etc.)](#generic-mcp-clients-claude-desktop--windsurf--etc)
+- [Verify Installation](#verify-installation)
+- [Workflows & Usage](#workflows--usage)
+  - [In-Host Auto Delegation (Rescue Skill)](#in-host-auto-delegation-rescue-skill)
+  - [Direct CLI Usage](#direct-cli-usage)
+  - [Interactive Decisions & Session Resumption (needs_decision)](#interactive-decisions--session-resumption-needs_decision)
+- [Underlying Calling Conventions](#underlying-calling-conventions)
+- [Safety & Deadlock Prevention](#safety--deadlock-prevention)
+- [Manual Smoke Testing](#manual-smoke-testing)
+- [Development & Testing](#development--testing)
 
 ---
 
-## 核心工作原理
+## How It Works
 
 ```
-[ 当前主控终端 / 编辑器 (Host) ] (如 Claude Code / Cursor / Agy)
+[ Active Terminal / Editor (Host) ] (e.g. Claude Code / Cursor / Agy)
               │
-              │  (1) 调用 MCP 工具: delegate_task(target_agent="codex", prompt="...")
+              │  (1) MCP Tool Call: delegate_task(target_agent="codex", prompt="...")
               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                 APA (本地对等桥接器 / MCP)                   │
+│                 APA (Local Peer Bridge / MCP)               │
 │                                                             │
-│  • 注入基线与安全信封 (APA_DELEGATION=1 防递归死锁)         │
-│  • 自动格式化目标 CLI 专有参数 (非交互/JSON输出/无沙箱逃逸) │
-│  • 子进程生命周期管控与超时守护                             │
+│  • Injects safety envelopes (APA_DELEGATION=1 recursion lock)│
+│  • Formats target-specific CLI flags (non-interactive/JSON) │
+│  • Manages sub-process lifecycle & timeout watchdogs        │
 └─────────────────────────────────────────────────────────────┘
               │
-              │  (2) 驱动目标 CLI (如: codex exec --json ...)
+              │  (2) Drives target CLI (e.g.: codex exec --json ...)
               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                 目标执行端 (Worker Agent)                   │
+│                 Target Execution (Worker Agent)             │
 │                                                             │
-│  • 消耗目标平台的独立订阅/Token 额度                         │
-│  • 直接读写本地工作区文件                                   │
+│  • Consumes target platform's own subscription/tokens       │
+│  • Reads and writes local workspace files directly          │
 └─────────────────────────────────────────────────────────────┘
               │
-              │  (3) 修改落盘 & 进程退出
+              │  (3) Changes committed to disk & process exits
               ▼
-[ 提取 git diff 与结构化结果 ] ──> 回传主控继续心流
+[ Extract git diff & structured summary ] ──> Returns to Host to continue flow
 ```
 
-- **零额外 API Key**：直接复用本地各家 CLI 已登录的认证会话与订阅额度。
-- **上下文防污染**：Worker 的冗长思考（CoT）、交互式控制字符与进度条被拦截在桥接层内部，仅回传精炼结论与 `git diff` 统计。
-- **会话持久保持**：如果 Worker 遇到分叉决策或需要确认，原样回传交互选项并保留 `session_id`，用户做出选择后无缝续接。
+- **Zero Extra API Keys**: Seamlessly reuses existing authenticated sessions and subscriptions in each installed CLI.
+- **Context Sanitization**: Worker internal chains-of-thought (CoT), terminal control characters, and progress bars are trapped inside the bridge layer; only clean summaries and `git diff` statistics are passed back to the Host.
+- **Session Preservation**: When a Worker encounters a branching decision or prompt, it returns the questions and options alongside a `session_id`, allowing the user to choose and resume without losing context.
 
 ---
 
-## 安装指南 (Installation)
+## Installation
 
-不同开发工具的插件与扩展管理方式不同。根据你常用的宿主（Host），直接复制对应的指令即可完成安装。
+Installation differs by harness. Simply copy and paste the commands for your preferred Host environment below.
 
-### 前置要求
+### Prerequisites
 
 1. **Node.js** >= 18
-2. 本地已安装并登录至少一个受支持的 Agent CLI（如 `codex`、`claude`、`agy`、`cursor`、`gemini`）。
-3. （可选）如果你打算以源码方式本地安装或二次开发，先克隆本仓库并安装依赖：
+2. At least one supported Agent CLI installed and logged in locally (`codex`, `claude`, `agy`, `cursor`, or `gemini`).
+3. (Optional) If installing from local source or developing:
    ```bash
    git clone https://github.com/wei292224644/agent-plugin-agent.git
    cd agent-plugin-agent
@@ -85,27 +87,27 @@
 
 ### Claude Code
 
-Claude Code 原生支持通过插件市场进行扩展。
+Claude Code supports plugins via its plugin marketplace.
 
-#### 远程一键安装（推荐）
+#### Remote One-Click Install (Recommended)
 
-在系统终端中运行：
+Run directly in your system terminal:
 
 ```bash
 claude plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
 claude plugin install apa@apa
 ```
 
-或者在已开启的 `claude` 交互终端内直接输入 Slash 命令：
+Or inside an active `claude` session using Slash commands:
 
 ```text
 /plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
 /plugin install apa@apa
 ```
 
-#### 本地克隆安装
+#### Local Checkout Install
 
-在克隆好的 `agent-plugin-agent` 目录下执行：
+From inside your local `agent-plugin-agent` directory:
 
 ```bash
 claude plugin marketplace add .
@@ -116,54 +118,54 @@ claude plugin install apa@apa
 
 ### Antigravity (agy)
 
-Antigravity 原生支持插件系统与技能自动加载。
+Antigravity natively discovers plugins and auto-loads their skills.
 
-#### 远程一键安装（推荐）
+#### Remote One-Click Install (Recommended)
 
-在终端中直接运行：
+Run in your terminal:
 
 ```bash
 agy plugin install https://github.com/wei292224644/agent-plugin-agent
 ```
 
-#### 本地克隆安装
+#### Local Checkout Install
 
-在克隆好的 `agent-plugin-agent` 目录下执行：
+From inside your local `agent-plugin-agent` directory:
 
 ```bash
 agy plugin install .
 ```
 
-> **更新**：重新执行一次相同的安装指令即可覆盖更新到最新版本。
+> **Update**: Re-running the same install command updates the plugin to the latest version.
 
 ---
 
 ### Codex CLI
 
-Codex 命令行支持通过插件体系注册并接入 MCP。
+Codex CLI supports adding plugin marketplaces and registering MCP tools.
 
-#### 终端命令安装
+#### Terminal Command Install
 
-在系统终端中运行：
+Run in your system terminal:
 
 ```bash
 codex plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
 codex plugin add apa@apa
 ```
 
-#### 交互式安装
+#### Interactive TUI Install
 
-在 `codex` 交互界面中输入：
+Inside an interactive `codex` session:
 
 ```text
 /plugins
 ```
 
-搜索 `apa`，然后选择 `Install Plugin`。
+Search for `apa` and select `Install Plugin`.
 
-#### 本地克隆安装
+#### Local Checkout Install
 
-在克隆好的 `agent-plugin-agent` 目录下执行：
+From inside your local `agent-plugin-agent` directory:
 
 ```bash
 codex plugin marketplace add .
@@ -174,43 +176,43 @@ codex plugin add apa@apa
 
 ### Codex App
 
-适用于 Codex 桌面客户端：
+For the Codex desktop application:
 
-1. 打开 Codex App，点击左侧边栏的 **Plugins**。
-2. 搜索 `APA`（或点击添加自定义市场源：`https://github.com/wei292224644/agent-plugin-agent`）。
-3. 点击 **Install** 确认安装。
+1. Open Codex App and navigate to **Plugins** in the sidebar.
+2. Search for `APA` (or add custom marketplace source: `https://github.com/wei292224644/agent-plugin-agent`).
+3. Click **Install**.
 
 ---
 
-### Cursor (Agent CLI 与 IDE)
+### Cursor (Agent CLI & IDE)
 
-#### Cursor Agent CLI 终端安装
+#### Cursor Agent CLI Install
 
-Cursor 官方 Agent CLI 支持直接添加 Git 地址：
+Cursor's official Agent CLI accepts Git repositories:
 
 ```bash
 agent plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
 agent plugin install apa@apa
 ```
 
-或者在 Cursor Agent 聊天框中输入：
+Or in the Cursor Agent chat window:
 
 ```text
 /add-plugin apa
 ```
 
-#### Cursor IDE (MCP 模式配置)
+#### Cursor IDE (MCP Mode)
 
-如果你主要使用 Cursor 编辑器窗口，可将其作为 MCP 服务器挂载：
+If using the Cursor editor interface, configure it directly as an MCP server.
 
-在项目根目录 `.cursor/mcp.json`（或全局 Cursor 设置中的 MCP 配置）中添加：
+In your project's `.cursor/mcp.json` (or global Cursor MCP Settings):
 
 ```json
 {
   "mcpServers": {
     "apa": {
       "command": "node",
-      "args": ["<仓库绝对路径>/src/cli.mjs", "mcp"]
+      "args": ["<ABSOLUTE_PATH_TO_REPO>/src/cli.mjs", "mcp"]
     }
   }
 }
@@ -220,25 +222,25 @@ agent plugin install apa@apa
 
 ### Gemini CLI
 
-Gemini CLI 采用扩展（Extensions）系统。
+Gemini CLI uses an extension system.
 
-#### 远程安装
+#### Remote Install
 
-在终端中执行：
+Run in your terminal:
 
 ```bash
 gemini extensions install https://github.com/wei292224644/agent-plugin-agent
 ```
 
-#### 本地链接模式（推荐用于本地开发）
+#### Local Link Mode (For development)
 
-在克隆好的 `agent-plugin-agent` 目录下执行：
+From inside your local `agent-plugin-agent` directory:
 
 ```bash
 gemini extensions link .
 ```
 
-#### 扩展更新
+#### Update Extension
 
 ```bash
 gemini extensions update apa
@@ -246,18 +248,18 @@ gemini extensions update apa
 
 ---
 
-### 通用 MCP 客户端 (Claude Desktop / Windsurf 等)
+### Generic MCP Clients (Claude Desktop / Windsurf / etc.)
 
-本仓库提供标准的 MCP Stdio 协议服务，可以接入任何兼容 MCP 的客户端（例如 Claude Desktop、Windsurf、Zed、Cline、Roo Code）。
+APA exposes a standard Stdio MCP server compatible with any MCP client (including Claude Desktop, Windsurf, Zed, Cline, Roo Code).
 
-在宿主的 MCP 配置文件中添加：
+Add the following to your client's MCP configuration JSON:
 
 ```json
 {
   "mcpServers": {
     "apa": {
       "command": "node",
-      "args": ["<仓库绝对路径>/src/cli.mjs", "mcp"]
+      "args": ["<ABSOLUTE_PATH_TO_REPO>/src/cli.mjs", "mcp"]
     }
   }
 }
@@ -265,15 +267,15 @@ gemini extensions update apa
 
 ---
 
-## 验证安装
+## Verify Installation
 
-无论使用哪种安装方式，均可在本地运行探测命令，快速核实本机已正确识别的 Agent 算力：
+Verify installed agent harnesses and path detection at any time with:
 
 ```bash
 node src/cli.mjs agents
 ```
 
-输出示例：
+Example output:
 
 ```json
 [
@@ -310,127 +312,127 @@ node src/cli.mjs agents
 ]
 ```
 
-只有 `installed: true` 的 Agent 才可以作为下发目标。
+Only agents with `"installed": true` can be targeted for delegation.
 
 ---
 
-## 使用方法与工作流
+## Workflows & Usage
 
-### 宿主内自动救援 (Rescue 技能)
+### In-Host Auto Delegation (Rescue Skill)
 
-安装插件后，宿主 Agent 会自动加载 [skills/apa-rescue/SKILL.md](skills/apa-rescue/SKILL.md) 技能。
+Once installed, your Host Agent automatically registers [skills/apa-rescue/SKILL.md](skills/apa-rescue/SKILL.md).
 
-在日常对话中，当遇到需要换环境实现、局部跨文件排错，或你直接对宿主说：
-> “把这个重构任务 rescue 给 Codex 做”  
-> “交给 Claude 跑一下测试并修复”
+Whenever a complex refactor, debugging task, or second opinion is needed, or whenever you say:
+> "Rescue this refactoring task to Codex"  
+> "Delegate this debugging run to Claude"
 
-宿主 Agent 会自动触发 `apa-rescue` 技能，通过 `delegate_task` MCP 工具把这块工作下发给指定目标，并在完成后向你呈现交付摘要与变更统计。
+Your Host Agent will proactively invoke the `delegate_task` MCP tool, wait for completion, and return diff statistics and deliverables without breaking your flow.
 
-**路由规则**：
-- 用户指定了目标（如“交给 codex”）：直接派给指定 Agent。
-- 用户未指名：默认将实现与排错派给 `codex`。
-- 如果当前会话本身已经是 Codex：自动转派给 `claude`。
-- **严禁派给自己**：绝不向当前宿主自身派发任务。
+**Default Routing Rules**:
+- Named target (e.g., "give this to Codex"): Dispatches to requested agent.
+- Unnamed target: Defaults to `codex` for implementation and debugging.
+- Host is already Codex: Automatically falls back to `claude`.
+- **Self-Exclusion**: Never delegates to the active Host.
 
 ---
 
-### 命令行直接调用 (CLI)
+### Direct CLI Usage
 
-除了作为 MCP 工具供模型调度外，你也可以在终端直接使用 CLI：
+You can also trigger task delegations directly from the command line:
 
 ```bash
-# 1. 查看本机检测到的 Agent 列表
+# 1. Discover available local agents
 node src/cli.mjs agents
 
-# 2. 直接委派任务给指定 Agent
-node src/cli.mjs delegate --target claude --prompt "只回复 pong，不要改文件"
+# 2. Delegate a task to a specific target
+node src/cli.mjs delegate --target claude --prompt "Reply pong only, do not modify files"
 
-# 3. 指定超时时间 (秒) 与关联文件
-node src/cli.mjs delegate --target codex --prompt "重构 auth 逻辑并补全单元测试" --file src/auth.ts --timeout 600
+# 3. Specify timeout (seconds) and target files
+node src/cli.mjs delegate --target codex --prompt "Refactor auth and add unit tests" --file src/auth.ts --timeout 600
 
-# 4. 从标准输入 (stdin) 读取提示词
+# 4. Pipe task from standard input (stdin)
 cat prompt.txt | node src/cli.mjs delegate --target agy
 
-# 5. 启动标准 MCP 服务 (stdio 模式)
+# 5. Start MCP server (stdio mode)
 node src/cli.mjs mcp
 ```
 
 ---
 
-### 交互式决断与会话续接 (needs_decision)
+### Interactive Decisions & Session Resumption (needs_decision)
 
-`delegate_task` 工具包含以下参数：
+`delegate_task` accepts the following arguments:
 - `target_agent`: `codex` | `claude` | `gemini` | `agy` | `cursor`
-- `prompt`: 独立、自洽的任务描述
-- `files`: （可选）子任务需要重点关注的文件路径列表
-- `timeout_seconds`: 超时时间（默认 300 秒，上限 1800 秒）
-- `session_id`: （可选）前次任务的会话 ID，用于会话续接
+- `prompt`: Standalone, self-contained task specification
+- `files`: (Optional) Key file paths to focus on
+- `timeout_seconds`: Execution timeout (default 300s, max 1800s)
+- `session_id`: (Optional) Previous session ID for conversation resumption
 
-**返回状态 (`status`)**：
-- `success`: 任务成功。附带 `summary`、`session_id`、`git_changes`（修改文件数、增删行数）。
-- `needs_decision`: 目标 Agent 遇到了不确定的分支选择。返回包含 `question`、`options` 与 `session_id`。宿主会将问题和选项呈现给用户；得到用户选择后，**携带同一个 `session_id` 再次调用 `delegate_task`**，目标 Agent 即可在原上下文中继续推进。
-- `failed` / `timed_out` / `not_installed` / `not_authenticated` / `busy`: 异常或忙碌中断。附带错误摘要，宿主停止下发。
+**Return Status (`status`)**:
+- `success`: Task completed successfully. Contains `summary`, `session_id`, and `git_changes` (files changed, insertions, deletions).
+- `needs_decision`: Worker encountered an ambiguous choice or confirmation prompt. Returns `question`, `options`, and `session_id`. The Host presents the question to you; once you reply, the Host calls `delegate_task` **with the same `session_id`** to continue in the same session.
+- `failed` / `timed_out` / `not_installed` / `not_authenticated` / `busy`: Execution halted. Returns failure details; Host halts execution.
 
 ---
 
-## 各平台底层调用规范
+## Underlying Calling Conventions
 
-APA 抹平了各家 CLI 的交互差异与参数格式，避免模型胡乱拼接 shell 产生安全隐患：
+APA handles CLI flag nuances across all supported targets:
 
-| Agent | 首次调用命令规范 | 会话续接 (Resume) 规范 | 关键注意项 |
+| Agent | Initial Invocation Command | Session Resumption (`--resume`) | Critical Notes |
 | :--- | :--- | :--- | :--- |
-| **Codex** | `codex exec --json --color never --sandbox workspace-write --approve-for-me --cd <cwd> -` | `codex exec resume --json <thread_id> -` | `exec resume` 不接受 `--sandbox`、`--cd`、`--color`。严禁加 `--ephemeral`。 |
-| **Claude Code** | `claude -p --output-format json --permission-mode acceptEdits --permission-prompts none` | 追加 `--resume <session_id>` | 走非交互 `-p` 模式并静默确认。 |
-| **Gemini** | `gemini -p <prompt> --output-format json --skip-trust --approval-mode auto_edit` | 追加 `--resume <session_id>` | 跳过可信提示，开启自动编辑确认。 |
-| **Antigravity (agy)** | `agy --print <prompt> --mode accept-edits --output-format json` | 追加 `--conversation <conversation_id>` | 自动接受代码变更。 |
-| **Cursor** | `agent --print --force --trust --output-format json --workspace <cwd>` | 追加 `--resume <session_id>` | 优先定位 `cursor-agent` 或 `agent` CLI，不调用 IDE 宿主 `cursor` 命令。 |
+| **Codex** | `codex exec --json --color never --sandbox workspace-write --approve-for-me --cd <cwd> -` | `codex exec resume --json <thread_id> -` | `exec resume` does not accept `--sandbox`, `--cd`, or `--color`. Never add `--ephemeral`. |
+| **Claude Code** | `claude -p --output-format json --permission-mode acceptEdits --permission-prompts none` | Appends `--resume <session_id>` | Runs in headless non-interactive mode. |
+| **Gemini** | `gemini -p <prompt> --output-format json --skip-trust --approval-mode auto_edit` | Appends `--resume <session_id>` | Skips trust prompts with auto-edit approval. |
+| **Antigravity (agy)** | `agy --print <prompt> --mode accept-edits --output-format json` | Appends `--conversation <conversation_id>` | Automatically accepts edits in print mode. |
+| **Cursor** | `agent --print --force --trust --output-format json --workspace <cwd>` | Appends `--resume <session_id>` | Prefers `cursor-agent` or `agent` CLI over IDE `cursor` executable. |
 
 ---
 
-## 安全机制与防死锁设计
+## Safety & Deadlock Prevention
 
-1. **工作区互斥并发锁**：同一工作区同一时间仅允许一个派发任务运行，避免多个子 Agent 并发写代码造成代码撕裂。
-2. **防递归死锁标记 (`APA_DELEGATION=1`)**：子进程启动时自动注入环境变量 `APA_DELEGATION=1`。若下游 Agent 试图再次调用 APA 桥，桥接层直接拦截并返回 `busy`，防止 A 调 B、B 又调 A 的无限死循环。
-3. **真实 TTY 与超时断路器**：严格实施超时守护与挂起检测，防止子进程因等待交互输入而永久静默挂起。
+1. **Workspace Concurrency Lock**: Only one delegated sub-task runs in a given workspace at any time, preventing concurrent write collisions.
+2. **Anti-Recursion Protection (`APA_DELEGATION=1`)**: Child processes inherit `APA_DELEGATION=1`. If a downstream agent tries to invoke APA again, the bridge immediately rejects with `busy`, preventing infinite recursive loops (A -> B -> A).
+3. **PTY Simulation & Watchdogs**: Hardened timeout handlers prevent hung child processes when commands wait on interactive user prompts.
 
 ---
 
-## 手工冒烟测试
+## Manual Smoke Testing
 
-推荐在一个独立的临时 Git 仓库中测试整套链路：
+Run this quick test in an isolated Git repository:
 
-1. **检查环境可用性**：
+1. **Check Environment**:
    ```bash
    node src/cli.mjs agents
    ```
-   确认需要测试的目标平台 `installed: true`。
-2. **单次极简派工验证**：
+   Ensure target agent shows `"installed": true`.
+2. **Minimal Delegation**:
    ```bash
-   node src/cli.mjs delegate --target claude --prompt "只回复一个词 pong，不要改动任何文件"
+   node src/cli.mjs delegate --target claude --prompt "Reply with the single word pong only, do not change any file"
    ```
-   验证返回 `status: "success"`，`git_changes.files_changed` 为 0，并记录返回的 `session_id`。
-3. **会话上下文续接验证**：
-   携带上一步获得的 `session_id` 再次派发：
+   Verify `status: "success"`, `git_changes.files_changed: 0`, and note the returned `session_id`.
+3. **Session Resumption**:
+   Resume using the returned `session_id`:
    ```bash
-   node src/cli.mjs delegate --target claude --session <上步返回的 session_id> --prompt "我上一句让你回复的词是什么？"
+   node src/cli.mjs delegate --target claude --session <session_id> --prompt "What was the word I just told you to reply?"
    ```
-   确认其能够基于原上下文正确回答。
-4. **账号就绪排查**：
-   若 Gemini 账号已升级或迁移至 Antigravity，可能会遇到 `IneligibleTierError`（状态为 `not_authenticated`），此时在当前机器上使用 `agy` 目标即可。
+   Verify it answers correctly from memory.
+4. **Account Ineligibility Check**:
+   If Gemini accounts have migrated to Antigravity, Gemini may return `IneligibleTierError` (`not_authenticated`). Use `agy` on such systems.
 
 ---
 
-## 开发与单元测试
+## Development & Testing
 
-本项目的单元测试严格进行参数组装与隔离验证，**不消耗真实模型额度**：
+Unit tests test argument construction and error states safely **without spending real model tokens**:
 
 ```bash
-# 运行单元测试
+# Run unit tests
 npm test
 ```
 
-测试覆盖：
-- 参数拼装安全规范（严格脱离脆弱 shell 字符串拼接）
-- 各 Agent 的首次调度与 resume 参数规范差异
-- 缺少二进制、未鉴权、并发互斥冲突、超时断路器与防重入递归拦截
-- Git 脏状态与 Diff 解析精度
+Test coverage includes:
+- Safe argument array construction (off-shell)
+- Resume command flag compatibility per CLI
+- Missing binaries, auth errors, timeouts, busy state, and recursive re-entry prevention
+- Git porcelain diff parsing
