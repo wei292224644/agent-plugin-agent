@@ -162,45 +162,90 @@ function killChild(child) {
   }
 }
 
-function runProcess(spec, timeoutMs, spawnImpl) {
+const tasks = new Map();
+
+function taskKey(cwd) {
+  return `cwd:${path.resolve(cwd)}`;
+}
+
+function statusFile(cwd) {
+  return lockFile(cwd).replace(/\.lock$/, ".status.json");
+}
+
+function publish(record, view) {
+  record.view = view;
+  try {
+    fs.writeFileSync(statusFile(record.cwd), JSON.stringify(view));
+  } catch {
+    // The temp directory can reject the write. The in-memory view still works.
+  }
+}
+
+function track(record) {
+  tasks.set(record.taskId, record);
+  tasks.set(taskKey(record.cwd), record);
+}
+
+function readStatusFile(cwd) {
+  try {
+    return { fileOnly: true, view: JSON.parse(fs.readFileSync(statusFile(cwd), "utf8")) };
+  } catch {
+    return null;
+  }
+}
+
+function lookup(taskId, cwd) {
+  if (taskId) return tasks.get(taskId) || null;
+  return tasks.get(taskKey(cwd)) || readStatusFile(cwd);
+}
+
+function startProcess(spec, timeoutMs, spawnImpl) {
   const stdout = new Capture();
   const stderr = new Capture();
-  return new Promise((resolve) => {
-    let child;
-    try {
-      child = spawnImpl(spec.command, spec.args, {
-        cwd: spec.cwd,
-        env: spec.env,
-        detached: true,
-        stdio: [spec.stdin == null ? "ignore" : "pipe", "pipe", "pipe"],
-      });
-    } catch (error) {
-      resolve({ exitCode: 1, stdout: "", stderr: error.message, timedOut: false });
-      return;
-    }
-
-    let settled = false;
-    let timedOut = false;
-    let exitCode = null;
-    let grace = null;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (grace) clearTimeout(grace);
-      resolve({
-        exitCode,
-        stdout: stdout.text(),
-        stderr: stderr.text(),
-        timedOut,
-      });
-    };
-    const timer = setTimeout(() => {
+  let settled = false;
+  let timedOut = false;
+  let exitCode = null;
+  let grace = null;
+  let timer = null;
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    if (grace) clearTimeout(grace);
+    resolveDone({
+      exitCode,
+      stdout: stdout.text(),
+      stderr: stderr.text(),
+      timedOut,
+    });
+  };
+  let child = null;
+  try {
+    child = spawnImpl(spec.command, spec.args, {
+      cwd: spec.cwd,
+      env: spec.env,
+      detached: true,
+      stdio: [spec.stdin == null ? "ignore" : "pipe", "pipe", "pipe"],
+    });
+  } catch (error) {
+    stderr.push(error.message);
+    exitCode = 1;
+    finish();
+  }
+  const disarm = () => {
+    if (timer) clearTimeout(timer);
+    if (grace) clearTimeout(grace);
+  };
+  if (child) {
+    timer = setTimeout(() => {
       timedOut = true;
       killChild(child);
       grace = setTimeout(finish, 1000);
     }, timeoutMs);
-
     child.stdout?.on("data", (chunk) => stdout.push(chunk));
     child.stderr?.on("data", (chunk) => stderr.push(chunk));
     child.on("error", (error) => {
@@ -216,7 +261,97 @@ function runProcess(spec, timeoutMs, spawnImpl) {
       child.stdin?.write(spec.stdin);
       child.stdin?.end();
     }
+  }
+  return {
+    done,
+    isSettled: () => settled,
+    output: () => ({ stdout: stdout.text(), stderr: stderr.text() }),
+    kill: () => {
+      disarm();
+      killChild(child);
+    },
+  };
+}
+
+function blank(target, started, sessionId) {
+  return {
+    target_agent: target,
+    duration_ms: Date.now() - started,
+    exit_code: null,
+    output: "",
+    session_id: sessionId || null,
+  };
+}
+
+function describe(record, ran) {
+  const pack = (fields) => ({
+    task_id: record.taskId,
+    ...blank(record.target, record.started, record.sessionId),
+    ...fields,
   });
+  let lastMessage = "";
+  if (record.lastMessagePath) {
+    try {
+      lastMessage = fs.readFileSync(record.lastMessagePath, "utf8");
+    } catch {
+      lastMessage = "";
+    }
+  }
+  const message = record.adapter.messageFrom(ran.stdout, lastMessage);
+  const sessionId = record.adapter.sessionIdFrom(ran.stdout) || record.sessionId || null;
+  const marker = interpret(message || ran.stdout);
+  const output = tailText(message || ran.stdout);
+  const git_changes = gitChanges(record.cwd, record.before, gitSnapshot(record.cwd));
+  const base = { exit_code: ran.exitCode, output, session_id: sessionId, git_changes };
+  if (record.cancelled) return pack({ ...base, status: "cancelled", summary: "已取消。" });
+  if (ran.timedOut) return pack({ ...base, status: "timed_out", summary: output });
+  if (ran.exitCode !== 0 && record.adapter.isAuthFailure(`${ran.stderr}\n${ran.stdout}`)) {
+    return pack({ ...base, status: "not_authenticated", summary: tailText(ran.stderr || output) });
+  }
+  if (marker?.kind === "decision") {
+    return pack({
+      ...base,
+      status: "needs_decision",
+      question: marker.question,
+      options: marker.options,
+      summary: marker.question,
+    });
+  }
+  if (ran.exitCode === 0 && !record.adapter.failed(ran.stdout)) {
+    const summary = marker?.kind === "result" ? marker.summary : message || output;
+    return pack({ ...base, status: "success", summary: tailText(summary) });
+  }
+  return pack({ ...base, status: "failed", summary: tailText(ran.stderr || message || output) });
+}
+
+function runningView(record) {
+  const snap = record.proc.output();
+  const message = record.adapter.messageFrom(snap.stdout, "");
+  const sessionId = record.adapter.sessionIdFrom(snap.stdout) || null;
+  return {
+    task_id: record.taskId,
+    ...blank(record.target, record.started, sessionId),
+    status: "running",
+    output: tailText(message || snap.stdout),
+    summary: "子 Agent 已启动。",
+    git_changes: gitChanges(record.cwd, record.before, gitSnapshot(record.cwd)),
+  };
+}
+
+function complete(record, view) {
+  if (record.final) return record.final;
+  record.final = view;
+  publish(record, view);
+  if (record.lastMessagePath) {
+    try {
+      fs.unlinkSync(record.lastMessagePath);
+    } catch {
+      // The CLI may not have created the file.
+    }
+  }
+  release(record.lock);
+  record.lock = null;
+  return view;
 }
 
 function versionOf(bin, env) {
@@ -260,72 +395,87 @@ export async function delegate(input, deps = {}) {
   const lock = acquire(cwd);
   if (!lock) return pack({ status: "busy", summary: "这个工作区已有派工在跑。" });
 
-  let lastMessagePath = null;
+  let spec;
   try {
-    const prompt = buildPrompt(input.prompt, input.files);
-    const spec = adapter.build({
+    spec = adapter.build({
       bin,
       cwd,
-      prompt,
+      prompt: buildPrompt(input.prompt, input.files),
       sessionId: input.sessionId || null,
     });
-    lastMessagePath = spec.lastMessagePath || null;
-    const before = gitSnapshot(cwd);
-    const ran = await runProcess(
-      { ...spec, cwd, env: { ...env, APA_DELEGATION: "1" } },
-      clampTimeout(input.timeoutSeconds),
-      deps.spawnImpl ?? spawn,
-    );
-    const after = gitSnapshot(cwd);
-    let lastMessage = "";
-    if (lastMessagePath) {
-      try {
-        lastMessage = fs.readFileSync(lastMessagePath, "utf8");
-      } catch {
-        lastMessage = "";
-      }
-    }
-    const message = adapter.messageFrom(ran.stdout, lastMessage);
-    const sessionId = adapter.sessionIdFrom(ran.stdout) || input.sessionId || null;
-    const marker = interpret(message || ran.stdout);
-    const output = tailText(message || ran.stdout);
-    const git_changes = gitChanges(cwd, before, after);
-    const base = {
-      exit_code: ran.exitCode,
-      output,
-      session_id: sessionId,
-      git_changes,
-    };
-    if (ran.timedOut) return pack({ ...base, status: "timed_out", summary: output });
-    if (ran.exitCode !== 0 && adapter.isAuthFailure(`${ran.stderr}\n${ran.stdout}`)) {
-      return pack({
-        ...base,
-        status: "not_authenticated",
-        summary: tailText(ran.stderr || output),
-      });
-    }
-    if (marker?.kind === "decision") {
-      return pack({
-        ...base,
-        status: "needs_decision",
-        question: marker.question,
-        options: marker.options,
-        summary: marker.question,
-      });
-    }
-    if (ran.exitCode === 0 && !adapter.failed(ran.stdout)) {
-      const summary = marker?.kind === "result" ? marker.summary : message || output;
-      return pack({ ...base, status: "success", summary: tailText(summary) });
-    }
-    return pack({ ...base, status: "failed", summary: tailText(ran.stderr || message || output) });
-  } finally {
-    if (lastMessagePath) {
-      try {
-        fs.unlinkSync(lastMessagePath);
-      } catch {
-        // The CLI may not have created the file.
-      }
-    }
+  } catch (error) {
     release(lock);
+    return pack({ status: "failed", summary: error.message });
   }
+
+  const proc = startProcess(
+    { ...spec, cwd, env: { ...env, APA_DELEGATION: "1" } },
+    clampTimeout(input.timeoutSeconds),
+    deps.spawnImpl ?? spawn,
+  );
+  const record = {
+    taskId: crypto.randomUUID(),
+    target,
+    cwd,
+    started,
+    adapter,
+    sessionId: input.sessionId || null,
+    before: gitSnapshot(cwd),
+    lastMessagePath: spec.lastMessagePath || null,
+    lock,
+    proc,
+    final: null,
+    cancelled: false,
+  };
+  track(record);
+  await Promise.resolve();
+  if (proc.isSettled()) return complete(record, describe(record, await proc.done));
+
+  proc.done.then((ran) => complete(record, describe(record, ran)));
+  const view = runningView(record);
+  publish(record, view);
+  return view;
+}
+
+function locate(input = {}) {
+  const env = input.env ?? process.env;
+  const cwd = path.resolve(input.cwd || env.APA_CWD || process.cwd());
+  return { cwd, record: lookup(input.taskId, cwd) };
+}
+
+export function taskStatus(input = {}) {
+  const { record } = locate(input);
+  if (!record) {
+    return {
+      status: "failed",
+      task_id: input.taskId || null,
+      summary: "没有这一单派工。",
+    };
+  }
+  if (record.fileOnly) return record.view;
+  if (record.final) return record.final;
+  const view = runningView(record);
+  publish(record, view);
+  return view;
+}
+
+export function taskCancel(input = {}) {
+  const { record } = locate(input);
+  if (!record || record.fileOnly) {
+    return {
+      status: "failed",
+      task_id: input.taskId || null,
+      summary: "没有可取消的派工。",
+    };
+  }
+  if (record.final) return record.final;
+  record.cancelled = true;
+  record.proc.kill();
+  if (record.final) return record.final;
+  return complete(record, describe(record, {
+    exitCode: null,
+    stdout: record.proc.output().stdout,
+    stderr: record.proc.output().stderr,
+    timedOut: false,
+  }));
 }

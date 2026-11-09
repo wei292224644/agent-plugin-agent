@@ -26,6 +26,7 @@ Supported platforms: `claude` (Claude Code), `agy` (Antigravity), `codex` (Codex
   - [In-Host Auto Delegation (Rescue Skill)](#in-host-auto-delegation-rescue-skill)
   - [Direct CLI Usage](#direct-cli-usage)
   - [Interactive Decisions & Session Resumption (needs_decision)](#interactive-decisions--session-resumption-needs_decision)
+  - [Progress While the Worker Runs](#progress-while-the-worker-runs)
 - [Underlying Calling Conventions](#underlying-calling-conventions)
 - [Safety & Deadlock Prevention](#safety--deadlock-prevention)
 - [Manual Smoke Testing](#manual-smoke-testing)
@@ -326,7 +327,7 @@ Whenever a complex refactor, debugging task, or second opinion is needed, or whe
 > "Rescue this refactoring task to Codex"  
 > "Delegate this debugging run to Claude"
 
-Your Host Agent will proactively invoke the `delegate_task` MCP tool, wait for completion, and return diff statistics and deliverables without breaking your flow.
+Your Host Agent invokes `delegate_task`. That call returns after the worker process is alive, not after the task is finished. The host then uses `task_status` for progress and the final result.
 
 **Default Routing Rules**:
 - Named target (e.g., "give this to Codex"): Dispatches to requested agent.
@@ -353,7 +354,11 @@ node src/cli.mjs delegate --target codex --prompt "Refactor auth and add unit te
 # 4. Pipe task from standard input (stdin)
 cat prompt.txt | node src/cli.mjs delegate --target agy
 
-# 5. Start MCP server (stdio mode)
+# 5. Check the worker in this directory, or cancel it
+node src/cli.mjs status
+node src/cli.mjs cancel
+
+# 6. Start MCP server (stdio mode)
 node src/cli.mjs mcp
 ```
 
@@ -372,6 +377,16 @@ node src/cli.mjs mcp
 - `success`: Task completed successfully. Contains `summary`, `session_id`, and `git_changes` (files changed, insertions, deletions).
 - `needs_decision`: Worker encountered an ambiguous choice or confirmation prompt. Returns `question`, `options`, and `session_id`. The Host presents the question to you; once you reply, the Host calls `delegate_task` **with the same `session_id`** to continue in the same session.
 - `failed` / `timed_out` / `not_installed` / `not_authenticated` / `busy`: Execution halted. Returns failure details; Host halts execution.
+- `cancelled`: The host stopped the worker with `task_cancel`.
+
+### Progress While the Worker Runs
+
+`delegate_task` starts the worker and returns only once that process is still alive:
+
+- `status: "running"` means the child agent is up. The payload includes `task_id`, the target, how long it has been running, and any output already printed. `session_id` is filled only after the worker CLI prints one. Resume still uses `session_id`, not `task_id`.
+- A worker that exits immediately (bad login, crash on startup) returns `failed` or `not_authenticated` in that same call. It is not reported as running.
+- `task_status` does not take the workspace lock. While the worker runs it returns elapsed time, the latest output tail, and `git_changes` so far. When the worker exits it returns the same final result `delegate_task` used to wait for (`success`, `needs_decision`, `failed`, `timed_out`).
+- `task_cancel` kills that process and returns `cancelled`. One workspace still runs one delegation at a time.
 
 ---
 

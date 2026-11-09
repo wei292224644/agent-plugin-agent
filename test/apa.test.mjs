@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { delegate, interpret } from "../src/runner.mjs";
+import { delegate, interpret, taskCancel, taskStatus } from "../src/runner.mjs";
 import { gitChanges, gitSnapshot } from "../src/git.mjs";
 
 function binDir(name) {
@@ -196,10 +196,16 @@ test("missing binary, auth failure, timeout, busy, and re-entry", async () => {
       spawnImpl: () => child(),
     },
   );
-  assert.equal(timed.status, "timed_out");
+  assert.equal(timed.status, "running");
+  let later = timed;
+  for (let i = 0; i < 20 && later.status === "running"; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    later = taskStatus({ taskId: timed.task_id, cwd });
+  }
+  assert.equal(later.status, "timed_out");
 
   let release;
-  const first = delegate(
+  const first = await delegate(
     { target: "claude", prompt: "hold", cwd, env: { ...process.env, PATH: dir } },
     {
       spawnImpl: () => {
@@ -209,14 +215,15 @@ test("missing binary, auth failure, timeout, busy, and re-entry", async () => {
       },
     },
   );
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(first.status, "running");
   const second = await delegate(
     { target: "claude", prompt: "other", cwd, env: { ...process.env, PATH: dir } },
     { spawnImpl: () => child() },
   );
   assert.equal(second.status, "busy");
   release();
-  const held = await first;
+  await new Promise((resolve) => setImmediate(resolve));
+  const held = taskStatus({ taskId: first.task_id, cwd });
   assert.equal(held.status, "success");
 
   rmSync(dir, { recursive: true, force: true });
@@ -252,6 +259,44 @@ test("gemini and agy put the prompt and resume id in argv", async () => {
     assert.equal(argv.includes("id-1"), true);
     assert.equal(argv.some((arg) => String(arg).includes("APA_DECISION")), true);
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a living child is reported only after it starts, then can be queried and cancelled", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "apa-live-"));
+  const dir = binDir("claude");
+  let proc;
+  const started = await delegate(
+    { target: "claude", prompt: "写模块", cwd, env: { ...process.env, PATH: dir } },
+    {
+      spawnImpl: () => {
+        proc = child();
+        return proc;
+      },
+    },
+  );
+  try {
+    assert.equal(started.status, "running");
+    assert.equal(started.summary, "子 Agent 已启动。");
+    assert.equal(typeof started.task_id, "string");
+    assert.equal(started.session_id, null);
+    proc.stdout.emit("data", "正在写测试\n");
+    const mid = taskStatus({ taskId: started.task_id, cwd });
+    assert.equal(mid.status, "running");
+    assert.match(mid.output, /正在写测试/);
+    assert.ok(mid.duration_ms >= 0);
+    const stopped = taskCancel({ taskId: started.task_id, cwd });
+    assert.equal(stopped.status, "cancelled");
+    const again = await delegate(
+      { target: "claude", prompt: "下一单", cwd, env: { ...process.env, PATH: dir } },
+      { spawnImpl: () => child() },
+    );
+    assert.equal(again.status, "running");
+    taskCancel({ taskId: again.task_id, cwd });
+  } finally {
+    taskCancel({ cwd });
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
   }
 });
 
