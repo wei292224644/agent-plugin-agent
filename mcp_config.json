@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "apa": {
+    "baton": {
       "command": "node",
       "args": ["src/cli.mjs", "mcp"],
       "cwd": "."
