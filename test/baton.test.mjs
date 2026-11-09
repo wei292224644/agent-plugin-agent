@@ -9,7 +9,7 @@ import { delegate, interpret, taskCancel, taskStatus } from "../src/runner.mjs";
 import { gitChanges, gitSnapshot } from "../src/git.mjs";
 
 function binDir(name) {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "apa-bin-"));
+  const dir = mkdtempSync(path.join(os.tmpdir(), "baton-bin-"));
   const file = path.join(dir, name);
   writeFileSync(file, "#!/bin/sh\nexit 0\n");
   chmodSync(file, 0o755);
@@ -116,7 +116,7 @@ test("codex resume argv drops sandbox flags and reads thread_id", async () => {
 });
 
 test("cursor prefers cursor-agent and passes --resume", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "apa-bin-"));
+  const dir = mkdtempSync(path.join(os.tmpdir(), "baton-bin-"));
   for (const name of ["agent", "cursor-agent"]) {
     const file = path.join(dir, name);
     writeFileSync(file, "#!/bin/sh\nexit 0\n");
@@ -151,7 +151,7 @@ test("cursor prefers cursor-agent and passes --resume", async () => {
 });
 
 test("missing binary, auth failure, timeout, busy, and re-entry", async () => {
-  const cwd = mkdtempSync(path.join(os.tmpdir(), "apa-work-"));
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-work-"));
   const missing = await delegate({
     target: "codex",
     prompt: "hi",
@@ -164,7 +164,7 @@ test("missing binary, auth failure, timeout, busy, and re-entry", async () => {
     target: "claude",
     prompt: "hi",
     cwd,
-    env: { ...process.env, APA_DELEGATION: "1" },
+    env: { ...process.env, BATON_DELEGATION: "1" },
   });
   assert.equal(blocked.status, "failed");
 
@@ -263,7 +263,7 @@ test("gemini and agy put the prompt and resume id in argv", async () => {
 });
 
 test("a living child is reported only after it starts, then can be queried and cancelled", async () => {
-  const cwd = mkdtempSync(path.join(os.tmpdir(), "apa-live-"));
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-live-"));
   const dir = binDir("claude");
   let proc;
   const started = await delegate(

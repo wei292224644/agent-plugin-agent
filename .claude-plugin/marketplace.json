@@ -1,17 +1,17 @@
 {
-  "name": "apa",
+  "name": "agent-plugin-agent",
   "owner": {
-    "name": "apa"
+    "name": "wei292224644"
   },
   "metadata": {
-    "description": "APA：当前 CLI 做宿主，另一家本地 CLI 做执行。",
-    "version": "0.1.0"
+    "description": "Baton：当前 CLI 做宿主，另一家本地 CLI 做执行。",
+    "version": "0.2.0"
   },
   "plugins": [
     {
-      "name": "apa",
+      "name": "baton",
       "description": "把一块有边界的工作下放到另一家本地 Agent CLI，需要决定时用同一会话继续。",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "source": "./"
     }
   ]

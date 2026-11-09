@@ -1,10 +1,10 @@
 {
-  "name": "apa",
-  "version": "0.1.0",
+  "name": "baton",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "bin": {
-    "apa": "src/cli.mjs"
+    "baton": "src/cli.mjs"
   },
   "scripts": {
     "start": "node src/cli.mjs",

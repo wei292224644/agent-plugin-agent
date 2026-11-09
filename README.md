@@ -1,4 +1,4 @@
-# APA (Agent-Plugin-Agent)
+# Baton
 
 **English** | [简体中文](README.zh-CN.md)
 
@@ -42,9 +42,9 @@ Supported platforms: `claude` (Claude Code), `agy` (Antigravity), `codex` (Codex
               │  (1) MCP Tool Call: delegate_task(target_agent="codex", prompt="...")
               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                 APA (Local Peer Bridge / MCP)               │
+│                 Baton (Local Peer Bridge / MCP)             │
 │                                                             │
-│  • Injects safety envelopes (APA_DELEGATION=1 recursion lock)│
+│  • Injects safety envelopes (BATON_DELEGATION=1 lock)       │
 │  • Formats target-specific CLI flags (non-interactive/JSON) │
 │  • Manages sub-process lifecycle & timeout watchdogs        │
 └─────────────────────────────────────────────────────────────┘
@@ -96,14 +96,14 @@ Run directly in your system terminal:
 
 ```bash
 claude plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
-claude plugin install apa@apa
+claude plugin install baton@agent-plugin-agent
 ```
 
 Or inside an active `claude` session using Slash commands:
 
 ```text
 /plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
-/plugin install apa@apa
+/plugin install baton@agent-plugin-agent
 ```
 
 #### Local Checkout Install
@@ -112,7 +112,7 @@ From inside your local `agent-plugin-agent` directory:
 
 ```bash
 claude plugin marketplace add .
-claude plugin install apa@apa
+claude plugin install baton@agent-plugin-agent
 ```
 
 ---
@@ -151,7 +151,7 @@ Run in your system terminal:
 
 ```bash
 codex plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
-codex plugin add apa@apa
+codex plugin add baton@agent-plugin-agent
 ```
 
 #### Interactive TUI Install
@@ -162,7 +162,7 @@ Inside an interactive `codex` session:
 /plugins
 ```
 
-Search for `apa` and select `Install Plugin`.
+Search for `baton` and select `Install Plugin`.
 
 #### Local Checkout Install
 
@@ -170,7 +170,7 @@ From inside your local `agent-plugin-agent` directory:
 
 ```bash
 codex plugin marketplace add .
-codex plugin add apa@apa
+codex plugin add baton@agent-plugin-agent
 ```
 
 ---
@@ -180,7 +180,7 @@ codex plugin add apa@apa
 For the Codex desktop application:
 
 1. Open Codex App and navigate to **Plugins** in the sidebar.
-2. Search for `APA` (or add custom marketplace source: `https://github.com/wei292224644/agent-plugin-agent`).
+2. Search for `Baton` (or add custom marketplace source: `https://github.com/wei292224644/agent-plugin-agent`).
 3. Click **Install**.
 
 ---
@@ -193,13 +193,13 @@ Cursor's official Agent CLI accepts Git repositories:
 
 ```bash
 agent plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
-agent plugin install apa@apa
+agent plugin install baton@agent-plugin-agent
 ```
 
 Or in the Cursor Agent chat window:
 
 ```text
-/add-plugin apa
+/add-plugin baton
 ```
 
 #### Cursor IDE (MCP Mode)
@@ -211,7 +211,7 @@ In your project's `.cursor/mcp.json` (or global Cursor MCP Settings):
 ```json
 {
   "mcpServers": {
-    "apa": {
+    "baton": {
       "command": "node",
       "args": ["<ABSOLUTE_PATH_TO_REPO>/src/cli.mjs", "mcp"]
     }
@@ -244,21 +244,21 @@ gemini extensions link .
 #### Update Extension
 
 ```bash
-gemini extensions update apa
+gemini extensions update baton
 ```
 
 ---
 
 ### Generic MCP Clients (Claude Desktop / Windsurf / etc.)
 
-APA exposes a standard Stdio MCP server compatible with any MCP client (including Claude Desktop, Windsurf, Zed, Cline, Roo Code).
+Baton exposes a standard Stdio MCP server compatible with any MCP client (including Claude Desktop, Windsurf, Zed, Cline, Roo Code).
 
 Add the following to your client's MCP configuration JSON:
 
 ```json
 {
   "mcpServers": {
-    "apa": {
+    "baton": {
       "command": "node",
       "args": ["<ABSOLUTE_PATH_TO_REPO>/src/cli.mjs", "mcp"]
     }
@@ -321,7 +321,7 @@ Only agents with `"installed": true` can be targeted for delegation.
 
 ### In-Host Auto Delegation (Rescue Skill)
 
-Once installed, your Host Agent automatically registers [skills/apa-rescue/SKILL.md](skills/apa-rescue/SKILL.md).
+Once installed, your Host Agent automatically registers [skills/baton-rescue/SKILL.md](skills/baton-rescue/SKILL.md).
 
 Whenever a complex refactor, debugging task, or second opinion is needed, or whenever you say:
 > "Rescue this refactoring task to Codex"  
@@ -392,7 +392,7 @@ node src/cli.mjs mcp
 
 ## Underlying Calling Conventions
 
-APA handles CLI flag nuances across all supported targets:
+Baton handles CLI flag nuances across all supported targets:
 
 | Agent | Initial Invocation Command | Session Resumption (`--resume`) | Critical Notes |
 | :--- | :--- | :--- | :--- |
@@ -407,7 +407,7 @@ APA handles CLI flag nuances across all supported targets:
 ## Safety & Deadlock Prevention
 
 1. **Workspace Concurrency Lock**: Only one delegated sub-task runs in a given workspace at any time, preventing concurrent write collisions.
-2. **Anti-Recursion Protection (`APA_DELEGATION=1`)**: Child processes inherit `APA_DELEGATION=1`. If a downstream agent tries to invoke APA again, the bridge immediately rejects with `busy`, preventing infinite recursive loops (A -> B -> A).
+2. **Anti-Recursion Protection (`BATON_DELEGATION=1`)**: Child processes inherit `BATON_DELEGATION=1`. If a downstream agent tries to invoke Baton again, the bridge immediately rejects with `busy`, preventing infinite recursive loops (A -> B -> A).
 3. **PTY Simulation & Watchdogs**: Hardened timeout handlers prevent hung child processes when commands wait on interactive user prompts.
 
 ---
@@ -451,3 +451,7 @@ Test coverage includes:
 - Resume command flag compatibility per CLI
 - Missing binaries, auth errors, timeouts, busy state, and recursive re-entry prevention
 - Git porcelain diff parsing
+
+---
+
+Formerly **Agent-Plugin-Agent (APA)**. The old install string `apa@apa` no longer works; use `baton@agent-plugin-agent`.

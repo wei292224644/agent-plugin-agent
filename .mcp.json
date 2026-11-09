@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "apa": {
+    "baton": {
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/src/cli.mjs", "mcp"]
     }
