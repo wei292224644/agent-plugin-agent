@@ -4,11 +4,11 @@ import { delegate, listAgents, taskCancel, taskStatus } from "./runner.mjs";
 import { startMcp } from "./mcp.mjs";
 
 const usage = `用法:
-  apa agents
-  apa delegate --target <codex|claude|gemini|agy|cursor> [--prompt <text>] [--session <id>] [--timeout <seconds>] [--file <path>...]
-  apa status [--task <id>]
-  apa cancel [--task <id>]
-  apa mcp
+  baton agents
+  baton delegate --target <codex|claude|gemini|agy|cursor> [--prompt <text>] [--session <id>] [--timeout <seconds>] [--file <path>...]
+  baton status [--task <id>]
+  baton cancel [--task <id>]
+  baton mcp
 
 没有 --prompt 时从 stdin 读取任务。
 `;
