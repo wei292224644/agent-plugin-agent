@@ -95,7 +95,7 @@ class Capture {
 
 function lockFile(cwd) {
   const hash = crypto.createHash("sha256").update(path.resolve(cwd)).digest("hex").slice(0, 16);
-  return path.join(os.tmpdir(), `apa-${hash}.lock`);
+  return path.join(os.tmpdir(), `baton-${hash}.lock`);
 }
 
 function pidAlive(pid) {
@@ -370,7 +370,7 @@ export function listAgents(env = process.env) {
 export async function delegate(input, deps = {}) {
   const started = Date.now();
   const env = input.env ?? process.env;
-  const cwd = path.resolve(input.cwd || env.APA_CWD || process.cwd());
+  const cwd = path.resolve(input.cwd || env.BATON_CWD || process.cwd());
   const target = input.target;
   const pack = (fields) => ({
     target_agent: target,
@@ -381,8 +381,8 @@ export async function delegate(input, deps = {}) {
     ...fields,
   });
 
-  if (env.APA_DELEGATION === "1") {
-    return pack({ status: "failed", summary: "APA_DELEGATION=1，拒绝再次派工。" });
+  if (env.BATON_DELEGATION === "1") {
+    return pack({ status: "failed", summary: "BATON_DELEGATION=1，拒绝再次派工。" });
   }
   const adapter = getAdapter(target);
   if (!adapter) return pack({ status: "failed", summary: `未知目标：${target}` });
@@ -409,7 +409,7 @@ export async function delegate(input, deps = {}) {
   }
 
   const proc = startProcess(
-    { ...spec, cwd, env: { ...env, APA_DELEGATION: "1" } },
+    { ...spec, cwd, env: { ...env, BATON_DELEGATION: "1" } },
     clampTimeout(input.timeoutSeconds),
     deps.spawnImpl ?? spawn,
   );
@@ -439,7 +439,7 @@ export async function delegate(input, deps = {}) {
 
 function locate(input = {}) {
   const env = input.env ?? process.env;
-  const cwd = path.resolve(input.cwd || env.APA_CWD || process.cwd());
+  const cwd = path.resolve(input.cwd || env.BATON_CWD || process.cwd());
   return { cwd, record: lookup(input.taskId, cwd) };
 }
 

@@ -10,7 +10,7 @@ export const codex = {
     return which(["codex"], env);
   },
   build({ bin, cwd, prompt, sessionId }) {
-    const lastMessagePath = path.join(os.tmpdir(), `apa-codex-${process.pid}-${Date.now()}.txt`);
+    const lastMessagePath = path.join(os.tmpdir(), `baton-codex-${process.pid}-${Date.now()}.txt`);
     // shortcut: `exec resume` 不接受 --sandbox/--cd/--color，升级 Codex 后再并回首次命令的参数。
     if (sessionId) {
       return {
