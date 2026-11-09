@@ -1,9 +1,9 @@
 ---
-name: apa-rescue
-description: Hands a bounded coding task to another local agent CLI through the apa MCP tools delegate_task, task_status, and task_cancel. Use proactively when implementation, debugging, or a second pass should run in another agent environment, when the user says rescue or asks to hand work to Codex, Claude, Agy, or Cursor, when delegate_task returns running, and when a previous task_status returned needs_decision for the same session.
+name: baton-rescue
+description: Hands a bounded coding task to another local agent CLI through the baton MCP tools delegate_task, task_status, and task_cancel. Use proactively when implementation, debugging, or a second pass should run in another agent environment, when the user says rescue or asks to hand work to Codex, Claude, Agy, or Cursor, when delegate_task returns running, and when a previous task_status returned needs_decision for the same session.
 ---
 
-# APA Rescue
+# Baton Rescue
 
 把一块有边界的工作下放到另一家本地 CLI。调用 MCP 工具 `delegate_task`。子 Agent 起来之后它会返回 `running`。再用 `task_status` 看进度和结果。不要自己拼 shell，也不要自己把这块做完。
 
@@ -17,7 +17,7 @@ description: Hands a bounded coding task to another local agent CLI through the 
 留在当前会话：
 
 - 一两处小改、解释当前 diff、问一个问题
-- `delegate_task` 不在工具列表里。告诉用户 apa MCP 没连上，然后停下
+- `delegate_task` 不在工具列表里。告诉用户 baton MCP 没连上，然后停下
 
 ## 派给谁
 
