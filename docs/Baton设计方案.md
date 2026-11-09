@@ -1,6 +1,7 @@
-# Agent-Plugin-Agent (APA) 架构设计方案
+# Baton 架构设计方案
 > **基于 MCP 的去中心化多 Agent 算力分发与协同体系**  
-> *创建时间：2026-11-06*
+> *曾用名：Agent-Plugin-Agent (APA)*  
+> *创建时间：2026-11-06；品牌更名：2026-11-09*
 
 ---
 
@@ -69,7 +70,7 @@
 
 ## 三、为什么选择 MCP 作为核心媒介
 
-MCP (Model Context Protocol) 是承载 `a-plugin-a` 的最佳工程抓手：
+MCP (Model Context Protocol) 是承载 Baton 的最佳工程抓手：
 
 1. **生态最大公约数**：
    主流 Agent（Claude Code, Cursor, Agy, Windsurf 等）均已原生集成 MCP Client。只要输出标准 MCP Server，无需针对每家单独写专用插件。
@@ -99,7 +100,7 @@ MCP (Model Context Protocol) 是承载 `a-plugin-a` 的最佳工程抓手：
               │  (1) MCP Tool Call: delegate_task(agent="cursor", prompt="...")
               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│               agent-bridge-mcp (本地通用中间件)               │
+│               Baton (本地通用中间件 / MCP)                    │
 │                                                             │
 │  [宿主自省]                 [算力探测]                      │
 │   检测自身运行环境,          扫描本地 $PATH:                │

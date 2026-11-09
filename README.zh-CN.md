@@ -1,4 +1,4 @@
-# APA (Agent-Plugin-Agent)
+# Baton
 
 [English](README.md) | **简体中文**
 
@@ -42,9 +42,9 @@
               │  (1) 调用 MCP 工具: delegate_task(target_agent="codex", prompt="...")
               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                 APA (本地对等桥接器 / MCP)                   │
+│                 Baton (本地对等桥接器 / MCP)                 │
 │                                                             │
-│  • 注入基线与安全信封 (APA_DELEGATION=1 防递归死锁)         │
+│  • 注入基线与安全信封 (BATON_DELEGATION=1 防递归死锁)         │
 │  • 自动格式化目标 CLI 专有参数 (非交互/JSON输出/无沙箱逃逸) │
 │  • 子进程生命周期管控与超时守护                             │
 └─────────────────────────────────────────────────────────────┘
@@ -96,14 +96,14 @@ Claude Code 原生支持通过插件市场进行扩展。
 
 ```bash
 claude plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
-claude plugin install apa@apa
+claude plugin install baton@agent-plugin-agent
 ```
 
 或者在已开启的 `claude` 交互终端内直接输入 Slash 命令：
 
 ```text
 /plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
-/plugin install apa@apa
+/plugin install baton@agent-plugin-agent
 ```
 
 #### 本地克隆安装
@@ -112,7 +112,7 @@ claude plugin install apa@apa
 
 ```bash
 claude plugin marketplace add .
-claude plugin install apa@apa
+claude plugin install baton@agent-plugin-agent
 ```
 
 ---
@@ -151,7 +151,7 @@ Codex 命令行支持通过插件体系注册并接入 MCP。
 
 ```bash
 codex plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
-codex plugin add apa@apa
+codex plugin add baton@agent-plugin-agent
 ```
 
 #### 交互式安装
@@ -162,7 +162,7 @@ codex plugin add apa@apa
 /plugins
 ```
 
-搜索 `apa`，然后选择 `Install Plugin`。
+搜索 `baton`，然后选择 `Install Plugin`。
 
 #### 本地克隆安装
 
@@ -170,7 +170,7 @@ codex plugin add apa@apa
 
 ```bash
 codex plugin marketplace add .
-codex plugin add apa@apa
+codex plugin add baton@agent-plugin-agent
 ```
 
 ---
@@ -180,7 +180,7 @@ codex plugin add apa@apa
 适用于 Codex 桌面客户端：
 
 1. 打开 Codex App，点击左侧边栏的 **Plugins**。
-2. 搜索 `APA`（或点击添加自定义市场源：`https://github.com/wei292224644/agent-plugin-agent`）。
+2. 搜索 `Baton`（或点击添加自定义市场源：`https://github.com/wei292224644/agent-plugin-agent`）。
 3. 点击 **Install** 确认安装。
 
 ---
@@ -193,13 +193,13 @@ Cursor 官方 Agent CLI 支持直接添加 Git 地址：
 
 ```bash
 agent plugin marketplace add https://github.com/wei292224644/agent-plugin-agent
-agent plugin install apa@apa
+agent plugin install baton@agent-plugin-agent
 ```
 
 或者在 Cursor Agent 聊天框中输入：
 
 ```text
-/add-plugin apa
+/add-plugin baton
 ```
 
 #### Cursor IDE (MCP 模式配置)
@@ -211,7 +211,7 @@ agent plugin install apa@apa
 ```json
 {
   "mcpServers": {
-    "apa": {
+    "baton": {
       "command": "node",
       "args": ["<仓库绝对路径>/src/cli.mjs", "mcp"]
     }
@@ -244,7 +244,7 @@ gemini extensions link .
 #### 扩展更新
 
 ```bash
-gemini extensions update apa
+gemini extensions update baton
 ```
 
 ---
@@ -258,7 +258,7 @@ gemini extensions update apa
 ```json
 {
   "mcpServers": {
-    "apa": {
+    "baton": {
       "command": "node",
       "args": ["<仓库绝对路径>/src/cli.mjs", "mcp"]
     }
@@ -321,7 +321,7 @@ node src/cli.mjs agents
 
 ### 宿主内自动救援 (Rescue 技能)
 
-安装插件后，宿主 Agent 会自动加载 [skills/apa-rescue/SKILL.md](skills/apa-rescue/SKILL.md) 技能。
+安装插件后，宿主 Agent 会自动加载 [skills/baton-rescue/SKILL.md](skills/baton-rescue/SKILL.md) 技能。
 
 在日常对话中，当遇到需要换环境实现、局部跨文件排错，或你直接对宿主说：
 > “把这个重构任务 rescue 给 Codex 做”  
@@ -392,7 +392,7 @@ node src/cli.mjs mcp
 
 ## 各平台底层调用规范
 
-APA 抹平了各家 CLI 的交互差异与参数格式，避免模型胡乱拼接 shell 产生安全隐患：
+Baton 抹平了各家 CLI 的交互差异与参数格式，避免模型胡乱拼接 shell 产生安全隐患：
 
 | Agent | 首次调用命令规范 | 会话续接 (Resume) 规范 | 关键注意项 |
 | :--- | :--- | :--- | :--- |
@@ -407,7 +407,7 @@ APA 抹平了各家 CLI 的交互差异与参数格式，避免模型胡乱拼�
 ## 安全机制与防死锁设计
 
 1. **工作区互斥并发锁**：同一工作区同一时间仅允许一个派发任务运行，避免多个子 Agent 并发写代码造成代码撕裂。
-2. **防递归死锁标记 (`APA_DELEGATION=1`)**：子进程启动时自动注入环境变量 `APA_DELEGATION=1`。若下游 Agent 试图再次调用 APA 桥，桥接层直接拦截并返回 `busy`，防止 A 调 B、B 又调 A 的无限死循环。
+2. **防递归死锁标记 (`BATON_DELEGATION=1`)**：子进程启动时自动注入环境变量 `BATON_DELEGATION=1`。若下游 Agent 试图再次调用 Baton 桥，桥接层直接拦截并返回 `busy`，防止 A 调 B、B 又调 A 的无限死循环。
 3. **真实 TTY 与超时断路器**：严格实施超时守护与挂起检测，防止子进程因等待交互输入而永久静默挂起。
 
 ---
@@ -451,3 +451,7 @@ npm test
 - 各 Agent 的首次调度与 resume 参数规范差异
 - 缺少二进制、未鉴权、并发互斥冲突、超时断路器与防重入递归拦截
 - Git 脏状态与 Diff 解析精度
+
+---
+
+曾用名：**Agent-Plugin-Agent (APA)**。旧安装串 `apa@apa` 已失效，请使用 `baton@agent-plugin-agent`。
