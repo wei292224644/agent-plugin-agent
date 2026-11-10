@@ -321,13 +321,18 @@ node src/cli.mjs agents
 
 ### 宿主内自动救援 (Rescue 技能)
 
-安装插件后，宿主 Agent 会自动加载 [skills/baton-rescue/SKILL.md](skills/baton-rescue/SKILL.md) 技能。
+安装插件后，宿主 Agent 会自动加载技能：
+
+- [skills/baton-rescue/SKILL.md](skills/baton-rescue/SKILL.md)：单跳下放 + 守候
+- [skills/baton-orchestrate/SKILL.md](skills/baton-orchestrate/SKILL.md)：可选调度——选 CLI、拆派、再派、汇总（不绑定 Speckit / OpenSpec / agent-skills）
 
 在日常对话中，当遇到需要换环境实现、局部跨文件排错，或你直接对宿主说：
 > “把这个重构任务 rescue 给 Codex 做”  
 > “交给 Claude 跑一下测试并修复”
 
 宿主 Agent 会调用 `delegate_task`。这一次返回发生在子进程还活着的时候，而不是等任务做完。主会话随即开一个后台子 Agent，调用 `task_wait` 守到结束。结束由宿主的子 Agent 完成通知送回。
+
+若要一次分给多家或先拆再派，走 `baton-orchestrate`：主控开调度子 Agent，由它调用 baton MCP。Baton 是运输层；工程流程仍由工作区自己带。
 
 **路由规则**：
 - 用户指定了目标（如“交给 codex”）：直接派给指定 Agent。
