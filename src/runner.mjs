@@ -53,11 +53,20 @@ export function interpret(text) {
   return { kind: "result", summary };
 }
 
-function clampTimeout(seconds) {
-  if (seconds == null || seconds === "") return 300_000;
-  const value = Number(seconds);
-  if (!Number.isFinite(value) || value <= 0) return 300_000;
-  return Math.min(value, 1800) * 1000;
+const DEFAULT_TIMEOUT_SECONDS = 300;
+const MAX_TIMEOUT_SECONDS = 1800;
+
+export function resolveTimeout(seconds) {
+  const requested = seconds == null || seconds === "" ? null : Number(seconds);
+  const valid = Number.isFinite(requested) && requested > 0;
+  const effectiveSeconds = valid
+    ? Math.min(requested, MAX_TIMEOUT_SECONDS)
+    : DEFAULT_TIMEOUT_SECONDS;
+  return {
+    ms: effectiveSeconds * 1000,
+    effectiveSeconds,
+    clamped: valid && requested > MAX_TIMEOUT_SECONDS,
+  };
 }
 
 function tailText(text) {
@@ -186,6 +195,21 @@ function nextForDecision() {
   return "把 question 和 options 交给用户；拿到选择后用同一个 session_id 再调 delegate_task。";
 }
 
+function nextForTimeout(sessionId) {
+  const resume = sessionId
+    ? `用同一个 session_id="${sessionId}" 再调 delegate_task 续做`
+    : "再调 delegate_task 续做，并保存返回的 session_id 以便后续续做";
+  return `超时已杀进程。${resume}；显式传更大的 timeout_seconds（默认 ${DEFAULT_TIMEOUT_SECONDS}，上限 ${MAX_TIMEOUT_SECONDS}）。不要在当前会话里把活做掉。`;
+}
+
+function summaryForTimeout(output, effectiveSeconds) {
+  const prefix = `超时（${effectiveSeconds}s）。\n`;
+  const body = String(output || "").trim() || "无子 Agent 输出。";
+  const budget = Math.max(0, OUTPUT_TAIL - prefix.length);
+  const clipped = body.length <= budget ? body : body.slice(-budget);
+  return `${prefix}${clipped}`;
+}
+
 function runningList(items) {
   return {
     status: "running",
@@ -199,6 +223,7 @@ function snapshotTask(snapshot) {
     task_id: snapshot.view.task_id || snapshot.taskId,
     target_agent: snapshot.view.target_agent,
     duration_ms: snapshot.view.duration_ms,
+    effective_timeout_seconds: snapshot.view.effective_timeout_seconds,
   };
 }
 
@@ -305,9 +330,22 @@ function describe(record, ran) {
   const marker = interpret(message || ran.stdout);
   const output = tailText(message || ran.stdout);
   const git_changes = gitChanges(record.cwd, record.before, gitSnapshot(record.cwd));
-  const base = { exit_code: ran.exitCode, output, session_id: sessionId, git_changes };
+  const base = {
+    exit_code: ran.exitCode,
+    output,
+    session_id: sessionId,
+    git_changes,
+    effective_timeout_seconds: record.effectiveTimeoutSeconds,
+  };
   if (record.cancelled) return pack({ ...base, status: "cancelled", summary: "已取消。" });
-  if (ran.timedOut) return pack({ ...base, status: "timed_out", summary: output });
+  if (ran.timedOut) {
+    return pack({
+      ...base,
+      status: "timed_out",
+      summary: summaryForTimeout(output, record.effectiveTimeoutSeconds),
+      next: nextForTimeout(sessionId),
+    });
+  }
   if (ran.exitCode !== 0 && record.adapter.isAuthFailure(`${ran.stderr}\n${ran.stdout}`)) {
     return pack({ ...base, status: "not_authenticated", summary: tailText(ran.stderr || output) });
   }
@@ -355,6 +393,7 @@ function runningView(record) {
     last_output_at: record.lastOutputAt || null,
     summary: output ? "子 Agent 输出中。" : "子 Agent 已启动。",
     git_changes: gitChanges(record.cwd, record.before, gitSnapshot(record.cwd)),
+    effective_timeout_seconds: record.effectiveTimeoutSeconds,
   };
 }
 
@@ -423,9 +462,10 @@ export async function delegate(input, deps = {}) {
     return pack({ status: "failed", summary: error.message });
   }
 
+  const timeout = resolveTimeout(input.timeoutSeconds);
   const proc = startProcess(
     { ...spec, cwd, env: { ...env, BATON_DELEGATION: "1" } },
-    clampTimeout(input.timeoutSeconds),
+    timeout.ms,
     deps.spawnImpl ?? spawn,
   );
   const record = {
@@ -440,6 +480,7 @@ export async function delegate(input, deps = {}) {
     proc,
     final: null,
     cancelled: false,
+    effectiveTimeoutSeconds: timeout.effectiveSeconds,
   };
   record.settled = new Promise((resolve) => {
     record.settle = resolve;
@@ -547,6 +588,7 @@ export function taskStatus(input = {}) {
       task_id: record.taskId,
       target_agent: record.target,
       duration_ms: Date.now() - record.started,
+      effective_timeout_seconds: record.effectiveTimeoutSeconds,
     })));
   }
   if (records.length) return latestByStarted(records).final;

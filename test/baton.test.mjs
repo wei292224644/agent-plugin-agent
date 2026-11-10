@@ -6,7 +6,15 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { delegate, interpret, progressNotification, taskCancel, taskStatus, taskWait } from "../src/runner.mjs";
+import {
+  delegate,
+  interpret,
+  progressNotification,
+  resolveTimeout,
+  taskCancel,
+  taskStatus,
+  taskWait,
+} from "../src/runner.mjs";
 import { gitChanges, gitSnapshot } from "../src/git.mjs";
 
 function binDir(name) {
@@ -225,20 +233,31 @@ test("missing binary, auth failure, timeout, parallel runs, and re-entry", async
       target: "claude",
       prompt: "hi",
       timeoutSeconds: 0.05,
+      sessionId: "sess-timeout",
       cwd,
       env: { ...process.env, PATH: dir },
     },
     {
-      spawnImpl: () => child(),
+      spawnImpl: () => {
+        const proc = child();
+        queueMicrotask(() => proc.stdout.emit("data", "写到一半\n"));
+        return proc;
+      },
     },
   );
   assert.equal(timed.status, "running");
+  assert.equal(timed.effective_timeout_seconds, 0.05);
   let later = timed;
-  for (let i = 0; i < 20 && later.status === "running"; i += 1) {
+  for (let i = 0; i < 40 && later.status === "running"; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 20));
     later = taskStatus({ taskId: timed.task_id, cwd });
   }
   assert.equal(later.status, "timed_out");
+  assert.equal(later.effective_timeout_seconds, 0.05);
+  assert.match(later.summary, /超时/);
+  assert.match(later.summary, /写到一半/);
+  assert.match(later.next, /session_id="sess-timeout"/);
+  assert.match(later.next, /timeout_seconds/);
 
   let firstProc;
   let secondProc;
@@ -255,6 +274,7 @@ test("missing binary, auth failure, timeout, parallel runs, and re-entry", async
       },
     );
     assert.equal(first.status, "running");
+    assert.equal(first.effective_timeout_seconds, 300);
     second = await delegate(
       { target: "claude", prompt: "other", cwd, env: { ...process.env, PATH: dir } },
       {
@@ -587,6 +607,54 @@ test("running task_status keeps stream output and last_output_at", async () => {
   }
 });
 
+test("resolveTimeout defaults, clamps, and keeps fractional seconds", () => {
+  assert.deepEqual(resolveTimeout(undefined), {
+    ms: 300_000,
+    effectiveSeconds: 300,
+    clamped: false,
+  });
+  assert.deepEqual(resolveTimeout(2400), {
+    ms: 1_800_000,
+    effectiveSeconds: 1800,
+    clamped: true,
+  });
+  assert.deepEqual(resolveTimeout(0.05), {
+    ms: 50,
+    effectiveSeconds: 0.05,
+    clamped: false,
+  });
+  for (const bad of [0, -1, NaN, ""]) {
+    assert.deepEqual(resolveTimeout(bad), {
+      ms: 300_000,
+      effectiveSeconds: 300,
+      clamped: false,
+    });
+  }
+});
+
+test("delegate reports effective_timeout_seconds when clamped to the cap", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-clamp-"));
+  const dir = binDir("claude");
+  try {
+    const started = await delegate(
+      {
+        target: "claude",
+        prompt: "long",
+        timeoutSeconds: 2400,
+        cwd,
+        env: { ...process.env, PATH: dir },
+      },
+      { spawnImpl: () => child() },
+    );
+    assert.equal(started.status, "running");
+    assert.equal(started.effective_timeout_seconds, 1800);
+    taskCancel({ taskId: started.task_id, cwd });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("baton skills ship with orchestrate and rescue frontmatter", () => {
   const rescue = readFileSync(path.join(import.meta.dirname, "../skills/baton-rescue/SKILL.md"), "utf8");
   const orchestrate = readFileSync(path.join(import.meta.dirname, "../skills/baton-orchestrate/SKILL.md"), "utf8");
@@ -595,6 +663,9 @@ test("baton skills ship with orchestrate and rescue frontmatter", () => {
   assert.match(orchestrate, /list_agents/);
   assert.match(orchestrate, /Process-agnostic|does \*\*not\*\* bind|do not require/i);
   assert.match(rescue, /baton-orchestrate/);
+  assert.match(rescue, /timeout_seconds/);
+  assert.match(orchestrate, /timeout_seconds/);
+  assert.match(orchestrate, /effective_timeout_seconds/);
   assert.doesNotMatch(rescue, /[\u4e00-\u9fff]/);
   assert.doesNotMatch(orchestrate, /[\u4e00-\u9fff]/);
 });

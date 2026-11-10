@@ -42,6 +42,7 @@ Say which target you picked before you call.
 - `target_agent`: the vendor chosen above
 - `prompt`: a self-contained task. State done criteria and which files to look at
 - `files`: include paths when you know them
+- `timeout_seconds`: default 300, hard cap 1800. Long jobs (migration, real-env verify, multi-file rewrite) must set this explicitly; omitting it often causes `timed_out`. The return includes `effective_timeout_seconds` (what actually applied after clamping)
 - When this is a continuation of the same job, pass the same `session_id`
 - The same workspace may run several jobs at once. If one is already `running`, still call `delegate_task` for the next; do not wait for the first to finish. Whether those jobs would touch the same files is for the current session to decide
 
@@ -52,7 +53,8 @@ Say which target you picked before you call.
 - The watcher does one thing only: call `task_wait` with that `task_id` and return the payload as-is. Do not poll `task_status`, do not open a shell, do not call `delegate_task` again. The watcher is a host sub-agent, not another baton worker.
 - Watcher returns `success`: tell the user `summary` and `git_changes`. Do not redo those edits in the current session.
 - Watcher returns `needs_decision`: ask the user the `question` and `options` unchanged. Wait for the answer. Call `delegate_task` again with the same `session_id`; `prompt` is only the user's choice. If that returns `running`, open another watcher. Do not choose for the user, and do not start an unrelated new job.
-- Watcher returns `failed`, `timed_out`, `not_authenticated`, or `cancelled`: relay `summary`, then stop. Do not finish the work in the current session.
+- Watcher returns `timed_out`: relay `summary` and `next`. If `session_id` is present, the user can continue with another `delegate_task` using that `session_id` and a larger `timeout_seconds`. Do not finish the work in the current session.
+- Watcher returns `failed`, `not_authenticated`, or `cancelled`: relay `summary`, then stop. Do not finish the work in the current session.
 - User wants to stop: the main session calls `task_cancel` with that `task_id` and reports the result. Do not wait for the watcher first.
 - Host has no background sub-agent: the main session calls `task_wait` itself until the job ends. Do not poll `task_status`, and do not hang a shell.
 - `task_status` is for a peek only. Do not use it to wait for completion.
