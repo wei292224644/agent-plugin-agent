@@ -27,6 +27,17 @@ export function extractJson(stdout) {
   } catch {
     // CLI warnings may sit in front of the JSON object.
   }
+  let last = null;
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      last = JSON.parse(trimmed);
+    } catch {
+      // Incomplete NDJSON line while the child is still streaming.
+    }
+  }
+  if (last) return last;
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
@@ -37,22 +48,47 @@ export function extractJson(stdout) {
   }
 }
 
-export function messageFromJson(stdout, keys) {
-  const obj = extractJson(stdout);
-  if (!obj) return "";
+function firstString(obj, keys) {
+  if (!obj || typeof obj !== "object") return "";
   for (const key of keys) {
-    if (typeof obj[key] === "string") return obj[key];
+    if (typeof obj[key] === "string" && obj[key]) return obj[key];
   }
   return "";
 }
 
-export function sessionFromJson(stdout, keys) {
-  const obj = extractJson(stdout);
-  if (!obj) return null;
-  for (const key of keys) {
-    if (typeof obj[key] === "string" && obj[key].trim()) return obj[key].trim();
+export function messageFromJson(stdout, keys) {
+  const text = String(stdout || "");
+  let message = "";
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const hit = firstString(JSON.parse(trimmed), keys);
+      if (hit) message = hit;
+    } catch {
+      // Incomplete NDJSON line while the child is still streaming.
+    }
   }
-  return null;
+  if (message) return message;
+  return firstString(extractJson(text), keys);
+}
+
+export function sessionFromJson(stdout, keys) {
+  const text = String(stdout || "");
+  let sessionId = null;
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const hit = firstString(JSON.parse(trimmed), keys).trim();
+      if (hit) sessionId = hit;
+    } catch {
+      // Incomplete NDJSON line while the child is still streaming.
+    }
+  }
+  if (sessionId) return sessionId;
+  const hit = firstString(extractJson(text), keys).trim();
+  return hit || null;
 }
 
 export function jsonFailed(stdout) {

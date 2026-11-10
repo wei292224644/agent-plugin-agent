@@ -46,7 +46,7 @@ export async function startMcp() {
   server.registerTool(
     "task_status",
     {
-      description: "看一眼一单派工。进行中返回时长、最近输出和目前的 git_changes。结束后返回最终结果。传 task_id 看这一单。不传 task_id 时，只有一单在跑才默认选中它；有多单则返回 tasks 清单。等结束用 task_wait，不要用这个工具轮询。",
+      description: "看一眼一单派工。进行中返回时长、最近输出、last_output_at 和目前的 git_changes。结束后返回最终结果。传 task_id 看这一单。不传 task_id 时，只有一单在跑才默认选中它；有多单则返回 tasks 清单。等结束用 task_wait，不要用这个工具轮询。",
       inputSchema: z.object({
         task_id: z.string().optional(),
       }),

@@ -43,10 +43,13 @@ function spawnOk(payload, onSpawn) {
 }
 
 test("interpret reads the last decision or result block", () => {
-  const decision = interpret("noise\nAPA_DECISION\nquestion: 用 Redis 吗？\noptions: Redis | 内存\nAPA_END\n");
+  const legacy = interpret("noise\nAPA_DECISION\nquestion: 用 Redis 吗？\noptions: Redis | 内存\nAPA_END\n");
+  assert.deepEqual(legacy, { kind: "decision", question: "用 Redis 吗？", options: ["Redis", "内存"] });
+  const decision = interpret("noise\nBATON_DECISION\nquestion: 用 Redis 吗？\noptions: Redis | 内存\nBATON_END\n");
   assert.deepEqual(decision, { kind: "decision", question: "用 Redis 吗？", options: ["Redis", "内存"] });
-  const result = interpret("APA_RESULT\nsummary: 已改 auth.ts\nAPA_END");
+  const result = interpret("BATON_RESULT\nsummary: 已改 auth.ts\nBATON_END");
   assert.equal(result.summary, "已改 auth.ts");
+  assert.equal(interpret("APA_RESULT\nsummary: 旧标记\nAPA_END").summary, "旧标记");
   assert.equal(interpret("no marker"), null);
 });
 
@@ -67,7 +70,7 @@ test("claude argv stays off the shell and resume adds --resume", async () => {
         args = [command, argv];
         return spawnOk({
           session_id: "sess-1",
-          result: "APA_RESULT\nsummary: 记住了\nAPA_END",
+          result: "BATON_RESULT\nsummary: 记住了\nBATON_END",
         })();
       },
     },
@@ -76,7 +79,7 @@ test("claude argv stays off the shell and resume adds --resume", async () => {
   assert.ok(args[1].includes("--resume"));
   assert.ok(args[1].includes("sess-1"));
   assert.ok(args[1].includes("--permission-prompts"));
-  assert.equal(args[1].at(-1).includes("APA_DECISION"), true);
+  assert.equal(args[1].at(-1).includes("BATON_DECISION"), true);
   assert.equal(args[1].at(-1).includes("src/a.ts"), true);
   assert.equal(result.status, "success");
   assert.equal(result.summary, "记住了");
@@ -101,7 +104,7 @@ test("codex resume argv drops sandbox flags and reads thread_id", async () => {
         return spawnOk(
           `${JSON.stringify({ type: "thread.started", thread_id: "thread-9" })}\n${JSON.stringify({
             type: "item.completed",
-            item: { type: "agent_message", text: "APA_RESULT\nsummary: ok\nAPA_END" },
+            item: { type: "agent_message", text: "BATON_RESULT\nsummary: ok\nBATON_END" },
           })}\n`,
         )();
       },
@@ -134,7 +137,7 @@ test("codex fresh argv keeps approve-for-me and omits sandbox", async () => {
         return spawnOk(
           `${JSON.stringify({ type: "thread.started", thread_id: "thread-1" })}\n${JSON.stringify({
             type: "item.completed",
-            item: { type: "agent_message", text: "APA_RESULT\nsummary: ok\nAPA_END" },
+            item: { type: "agent_message", text: "BATON_RESULT\nsummary: ok\nBATON_END" },
           })}\n`,
         )();
       },
@@ -169,7 +172,7 @@ test("cursor prefers cursor-agent and passes --resume", async () => {
       spawnImpl: (bin, args) => {
         command = bin;
         argv = args;
-        return spawnOk({ session_id: "chat-1", result: "APA_DECISION\nquestion: 选哪个？\noptions: A | B\nAPA_END" })();
+        return spawnOk({ session_id: "chat-1", result: "BATON_DECISION\nquestion: 选哪个？\noptions: A | B\nBATON_END" })();
       },
     },
   ).then((result) => {
@@ -314,15 +317,15 @@ test("gemini and agy put the prompt and resume id in argv", async () => {
         spawnImpl: (command, args) => {
           argv = args;
           const payload = target === "agy"
-            ? { conversation_id: "id-1", status: "SUCCESS", response: "APA_RESULT\nsummary: ok\nAPA_END" }
-            : { session_id: "id-1", response: "APA_RESULT\nsummary: ok\nAPA_END" };
+            ? { conversation_id: "id-1", status: "SUCCESS", response: "BATON_RESULT\nsummary: ok\nBATON_END" }
+            : { session_id: "id-1", response: "BATON_RESULT\nsummary: ok\nBATON_END" };
           return spawnOk(payload)();
         },
       },
     );
     assert.equal(argv.includes(resumeFlag), true);
     assert.equal(argv.includes("id-1"), true);
-    assert.equal(argv.some((arg) => String(arg).includes("APA_DECISION")), true);
+    assert.equal(argv.some((arg) => String(arg).includes("BATON_DECISION")), true);
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -402,7 +405,7 @@ test("taskWait blocks until the worker finishes and survives a throwing progress
     },
   }));
   await new Promise((resolve) => setTimeout(resolve, 35));
-  proc.stdout.emit("data", "{\"result\":\"APA_RESULT\\nsummary: 写完了\\nAPA_END\"}");
+  proc.stdout.emit("data", "{\"result\":\"BATON_RESULT\\nsummary: 写完了\\nBATON_END\"}");
   proc.emit("close", 0);
   const done = await waiting;
   assert.equal(done.status, "success");
@@ -426,7 +429,7 @@ test("taskWait returns a cancelled task and an already finished task without han
 
   const finished = await delegate(
     { target: "claude", prompt: "快", cwd, env: { ...process.env, PATH: dir } },
-    { spawnImpl: spawnOk({ result: "APA_RESULT\nsummary: 立刻好了\nAPA_END" }) },
+    { spawnImpl: spawnOk({ result: "BATON_RESULT\nsummary: 立刻好了\nBATON_END" }) },
   );
   assert.equal(finished.status, "success");
   const again = await waitTimeout(taskWait({ taskId: finished.task_id, cwd }));
@@ -481,6 +484,51 @@ test("gitChanges reports only paths whose porcelain line changed", () => {
   assert.equal(changes.files_changed, 2);
   assert.ok(changes.insertions >= 1);
   assert.match(changes.diff_stat, /a\.txt/);
-  assert.match(changes.diff_stat, /b\.txt \| untracked/);
+  assert.match(changes.diff_stat, /b\.txt \| untracked \+1/);
   rmSync(cwd, { recursive: true, force: true });
+});
+
+test("gitChanges detects content edits to files that stay untracked", () => {
+  const cwd = mkdtempSync(path.join(import.meta.dirname, "tmp-"));
+  const git = (args) => execFileSync("git", args, { cwd, encoding: "utf8" });
+  git(["init"]);
+  writeFileSync(path.join(cwd, "u.txt"), "aaa\n");
+  const before = gitSnapshot(cwd);
+  writeFileSync(path.join(cwd, "u.txt"), "aaa\nbbb\nccc\n");
+  const after = gitSnapshot(cwd);
+  const changes = gitChanges(cwd, before, after);
+  assert.equal(changes.files_changed, 1);
+  assert.ok(changes.insertions >= 2);
+  assert.match(changes.diff_stat, /u\.txt \| untracked/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test("running task_status keeps stream output and last_output_at", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-live-out-"));
+  const dir = binDir("claude");
+  let proc;
+  const started = await delegate(
+    { target: "claude", prompt: "流", cwd, env: { ...process.env, PATH: dir } },
+    {
+      spawnImpl: () => {
+        proc = child();
+        return proc;
+      },
+    },
+  );
+  try {
+    assert.equal(started.status, "running");
+    assert.equal(started.output, "");
+    assert.equal(started.last_output_at, null);
+    proc.stdout.emit("data", "{\"partial\":true}\n{\"result\":\"正在写模块\"}\n");
+    const mid = taskStatus({ taskId: started.task_id, cwd });
+    assert.equal(mid.status, "running");
+    assert.match(mid.output, /正在写模块/);
+    assert.equal(typeof mid.last_output_at, "number");
+    assert.equal(mid.summary, "子 Agent 输出中。");
+  } finally {
+    taskCancel({ taskId: started.task_id, cwd });
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
