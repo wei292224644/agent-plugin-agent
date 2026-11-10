@@ -116,6 +116,38 @@ test("codex resume argv drops sandbox flags and reads thread_id", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("codex fresh argv keeps approve-for-me and omits sandbox", async () => {
+  const dir = binDir("codex");
+  let command = "";
+  let argv = [];
+  const result = await delegate(
+    {
+      target: "codex",
+      prompt: "记住 APA-CODEX",
+      cwd: dir,
+      env: { ...process.env, PATH: dir },
+    },
+    {
+      spawnImpl: (bin, args) => {
+        command = bin;
+        argv = args;
+        return spawnOk(
+          `${JSON.stringify({ type: "thread.started", thread_id: "thread-1" })}\n${JSON.stringify({
+            type: "item.completed",
+            item: { type: "agent_message", text: "APA_RESULT\nsummary: ok\nAPA_END" },
+          })}\n`,
+        )();
+      },
+    },
+  );
+  assert.equal(argv.includes("--approve-for-me"), true);
+  assert.equal(argv.includes("--sandbox"), false);
+  assert.equal(argv.includes("workspace-write"), false);
+  assert.equal(path.basename(command), "codex");
+  assert.equal(result.status, "success");
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("cursor prefers cursor-agent and passes --resume", async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "baton-bin-"));
   for (const name of ["agent", "cursor-agent"]) {
