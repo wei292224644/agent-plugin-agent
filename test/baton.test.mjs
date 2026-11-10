@@ -593,6 +593,8 @@ test("baton skills ship with orchestrate and rescue frontmatter", () => {
   assert.match(rescue, /^name:\s*baton-rescue\s*$/m);
   assert.match(orchestrate, /^name:\s*baton-orchestrate\s*$/m);
   assert.match(orchestrate, /list_agents/);
-  assert.match(orchestrate, /不绑定/);
+  assert.match(orchestrate, /Process-agnostic|does \*\*not\*\* bind|do not require/i);
   assert.match(rescue, /baton-orchestrate/);
+  assert.doesNotMatch(rescue, /[\u4e00-\u9fff]/);
+  assert.doesNotMatch(orchestrate, /[\u4e00-\u9fff]/);
 });

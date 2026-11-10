@@ -5,80 +5,80 @@ description: Opens a host-side orchestrator sub-agent that picks local CLIs, spl
 
 # Baton Orchestrate
 
-主控只下目标。开一个**宿主自己的后台子 Agent**当调度（orchestrator）。调度者选 CLI、拆活、派工、守候、必要时换家再派，最后汇总。工人仍是各家本地 CLI。
+The main session only states the goal. Open a **host background sub-agent** as the orchestrator. The orchestrator picks CLIs, splits work, delegates, waits, fails over when needed, then summarizes. Workers remain the local CLIs.
 
-这是可选用法。单跳下放继续用 `baton-rescue`。
+This is optional. For a single one-shot handoff, keep using `baton-rescue`.
 
-Baton 是运输层，**不绑定**任何工程方法论。工作区若有 `.agents/`、OpenSpec、Speckit 或自研规约，可写进工人 prompt；没有就空手派。
+Baton is the transport layer. It does **not** bind any engineering methodology. If the workspace already has `.agents/`, OpenSpec, Speckit, or custom rules, fold them into worker prompts; if not, send empty-handed.
 
-## 角色
+## Roles
 
-| 角色 | 是谁 | 做什么 |
+| Role | Who | Does |
 |---|---|---|
-| 主控 | 当前会话 | 开调度子 Agent；转达用户停令；收汇总 |
-| 调度 | 宿主后台子 Agent | `list_agents`、拆任务、`delegate_task`、`task_wait`、失败换家、汇总 |
-| 守候 | 可与调度同一子 Agent，或每单再开一个 | 只 `task_wait`；工具列表没有就调度自己守 |
-| 工人 | `codex` / `claude` / `gemini` / `agy` / `cursor` | 改代码；不要在工人里再调 baton |
+| Host | Current session | Start the orchestrator sub-agent; relay stop requests; receive the summary |
+| Orchestrator | Host background sub-agent | `list_agents`, split tasks, `delegate_task`, `task_wait`, fail over, summarize |
+| Watcher | Same sub-agent, or one per job | Only `task_wait`; if that tool is missing, the orchestrator waits itself |
+| Worker | `codex` / `claude` / `gemini` / `agy` / `cursor` | Edit code; must not call baton again |
 
-调度发生在宿主侧。不要派一个 baton worker 再让它去派别人（`BATON_DELEGATION` 会拒）。
+Orchestration stays on the host side. Do not send a baton worker out to dispatch others (`BATON_DELEGATION` will refuse).
 
-## 何时用
+## When to use
 
-用：
+Use when:
 
-- 用户要分发、编排、多 CLI、并行几块有边界的活
-- 一块活可能要拆给两家，或失败后换家
+- The user wants distribution, orchestration, multiple CLIs, or several bounded jobs in parallel
+- One goal may need splitting across vendors, or fail-over after a bad run
 
-不用（改走 `baton-rescue` 或留在主控）：
+Do not use (prefer `baton-rescue` or stay in the host):
 
-- 用户已点名一家、只要一跳
-- 一两处小改、解释 diff、问问题
-- `delegate_task` 不在工具列表里 → 告诉用户 baton 没连上，停下
+- The user already named one vendor and wants a single hop
+- One or two small edits, explaining a diff, or a question
+- `delegate_task` is missing from the tool list → tell the user baton is not connected, then stop
 
-## 主控怎么开调度
+## How the host starts the orchestrator
 
-1. 先说一句：开调度子 Agent。
-2. Cursor：后台 Task。Claude Code：后台 Agent。
-3. 把下面「调度任务书」原样交给它（填入用户目标）。主控不等它跑完中间步骤；结束时收汇总。
-4. 用户要停：主控对还在跑的 `task_id` 调 `task_cancel`，并告知调度者。
+1. Say one line: starting an orchestrator sub-agent.
+2. Cursor: background Task. Claude Code: background Agent.
+3. Hand it the “Orchestrator brief” below (fill in the user goal). The host does not babysit intermediate steps; it takes the final summary.
+4. If the user wants to stop: the host `task_cancel`s live `task_id`s and tells the orchestrator.
 
-## 调度任务书（交给子 Agent）
+## Orchestrator brief (give to the sub-agent)
 
 ```text
-你是 Baton 调度代理（orchestrator），不是工人。
+You are a Baton orchestrator, not a worker.
 
-目标：
-<用户目标原话>
+Goal:
+<user goal verbatim>
 
-约束：
-- 只通过 baton MCP：list_agents、delegate_task、task_wait、task_cancel
-- 不要自己改仓库文件；不要开 shell 轮询
-- 不要要求 Speckit / OpenSpec / agent-skills；工作区若已有规约，摘进工人 prompt 即可，没有就省略
-- 不要派给当前宿主自己所在的那一家 CLI
-- 默认最多同时 3 单 running；需要更多先问主控
-- 默认失败换家，不要无故双跑同一改动
-- 会改到重叠路径的任务串行；路径不重叠可并行
-- 每单 running 后用 task_wait 守到结束（可同会话顺序守，或再开只守 task_wait 的后台子 Agent）
-- needs_decision：把 question/options 交回主控，等用户，再带同一 session_id 续派；不要替用户选
-- 结束后只交一份汇总：派了谁、各单 status、summary、git_changes、换过谁
+Rules:
+- Use only baton MCP: list_agents, delegate_task, task_wait, task_cancel
+- Do not edit repo files yourself; do not open a shell to poll
+- Do not require Speckit / OpenSpec / agent-skills; if the workspace already has rules, copy them into worker prompts, otherwise omit
+- Do not delegate to the CLI vendor this host session already is
+- Default max 3 jobs running at once; ask the host before going higher
+- Default on failure: switch vendor once; do not dual-run the same edit without cause
+- Serialize jobs that would touch overlapping paths; path-disjoint jobs may run in parallel
+- After each running job, task_wait until it ends (same session in order, or spawn a watcher whose only job is task_wait)
+- needs_decision: return question/options to the host, wait for the user, then resume with the same session_id; do not choose for the user
+- When all jobs are terminal, return one summary: who was used, each status, summary, git_changes, any fail-overs
 
-步骤：
-1. list_agents，只派 installed 的
-2. 拆成有边界的子任务（每单自洽 prompt + 建议 files）
-3. 选 target_agent 并说明理由（一句）
-4. delegate_task；记下 task_id
-5. task_wait；失败/超时可换另一家重派同一子任务一次
-6. 全部终态后汇总
+Steps:
+1. list_agents; only use installed targets
+2. Split into bounded subtasks (self-contained prompt + suggested files each)
+3. Pick target_agent and say why in one sentence
+4. delegate_task; keep task_id
+5. task_wait; on failed/timed_out, re-dispatch the same subtask once to another vendor
+6. Summarize after every job is terminal
 ```
 
-## 选家（调度用）
+## Picking a vendor (for the orchestrator)
 
-- 用户点名 → 听用户
-- 否则实现/排错默认 `codex`；当前宿主已是 Codex → `claude`
-- 调研/长上下文可考虑 `gemini` / `agy`；局部编辑可考虑 `cursor`
-- `not_installed` / `not_authenticated` → 换下一家，不要死磕
+- User named a target → honor it
+- Otherwise implementation/debug defaults to `codex`; if the host is already Codex → `claude`
+- Research / long context may use `gemini` / `agy`; local edits may use `cursor`
+- `not_installed` / `not_authenticated` → try the next vendor; do not stick
 
-## 和 baton-rescue 的分工
+## Versus baton-rescue
 
-- 一跳、已点名、简单下放 → `baton-rescue`
-- 要拆、要并行、要换家、要汇总 → 本 skill
+- One hop, named target, simple handoff → `baton-rescue`
+- Split, parallel, fail-over, summarize → this skill
