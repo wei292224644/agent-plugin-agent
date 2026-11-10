@@ -330,6 +330,60 @@ test("gemini and agy put the prompt and resume id in argv", async () => {
   }
 });
 
+test("running and needs_decision returns tell the host what to do next", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-next-"));
+  const dir = binDir("claude");
+  let proc;
+  const started = await delegate(
+    { target: "claude", prompt: "写模块", cwd, env: { ...process.env, PATH: dir } },
+    {
+      spawnImpl: () => {
+        proc = child();
+        return proc;
+      },
+    },
+  );
+  try {
+    assert.equal(started.status, "running");
+    assert.match(started.next, new RegExp(`task_wait\\(task_id="${started.task_id}"\\)`));
+    assert.match(started.next, /后台子 Agent/);
+    assert.match(started.next, /不要轮询 task_status/);
+    const mid = taskStatus({ taskId: started.task_id, cwd });
+    assert.equal(mid.status, "running");
+    assert.equal(mid.next, undefined);
+    taskCancel({ taskId: started.task_id, cwd });
+  } finally {
+    taskCancel({ cwd });
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+
+  const decCwd = mkdtempSync(path.join(os.tmpdir(), "baton-next-dec-"));
+  const decDir = binDir("claude");
+  try {
+    const decided = await delegate(
+      {
+        target: "claude",
+        prompt: "选一个",
+        sessionId: "sess-1",
+        cwd: decCwd,
+        env: { ...process.env, PATH: decDir },
+      },
+      {
+        spawnImpl: spawnOk(
+          "BATON_DECISION\nquestion: 选哪个？\noptions: A | B\nBATON_END",
+        ),
+      },
+    );
+    assert.equal(decided.status, "needs_decision");
+    assert.match(decided.next, /session_id/);
+    assert.match(decided.next, /delegate_task/);
+  } finally {
+    rmSync(decDir, { recursive: true, force: true });
+    rmSync(decCwd, { recursive: true, force: true });
+  }
+});
+
 test("a living child is reported only after it starts, then can be queried and cancelled", async () => {
   const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-live-"));
   const dir = binDir("claude");
