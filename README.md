@@ -44,7 +44,7 @@ Supported platforms: `claude` (Claude Code), `agy` (Antigravity), `codex` (Codex
 ┌─────────────────────────────────────────────────────────────┐
 │                 Baton (Local Peer Bridge / MCP)             │
 │                                                             │
-│  • Injects safety envelopes (BATON_DELEGATION=1 lock)       │
+│  • Injects safety envelopes (BATON_DELEGATION=1)            │
 │  • Formats target-specific CLI flags (non-interactive/JSON) │
 │  • Manages sub-process lifecycle & timeout watchdogs        │
 └─────────────────────────────────────────────────────────────┘
@@ -327,7 +327,7 @@ Whenever a complex refactor, debugging task, or second opinion is needed, or whe
 > "Rescue this refactoring task to Codex"  
 > "Delegate this debugging run to Claude"
 
-Your Host Agent invokes `delegate_task`. That call returns after the worker process is alive, not after the task is finished. The host then uses `task_status` for progress and the final result.
+Your Host Agent invokes `delegate_task`. That call returns after the worker process is alive, not after the task is finished. The main session then starts a background sub-agent whose only job is `task_wait`. The host wakes the main session when that sub-agent finishes.
 
 **Default Routing Rules**:
 - Named target (e.g., "give this to Codex"): Dispatches to requested agent.
@@ -354,8 +354,9 @@ node src/cli.mjs delegate --target codex --prompt "Refactor auth and add unit te
 # 4. Pipe task from standard input (stdin)
 cat prompt.txt | node src/cli.mjs delegate --target agy
 
-# 5. Check the worker in this directory, or cancel it
+# 5. Inspect, wait for, or cancel a worker. Pass --task <id> when several are running here
 node src/cli.mjs status
+node src/cli.mjs wait --task <id>
 node src/cli.mjs cancel
 
 # 6. Start MCP server (stdio mode)
@@ -376,7 +377,7 @@ node src/cli.mjs mcp
 **Return Status (`status`)**:
 - `success`: Task completed successfully. Contains `summary`, `session_id`, and `git_changes` (files changed, insertions, deletions).
 - `needs_decision`: Worker encountered an ambiguous choice or confirmation prompt. Returns `question`, `options`, and `session_id`. The Host presents the question to you; once you reply, the Host calls `delegate_task` **with the same `session_id`** to continue in the same session.
-- `failed` / `timed_out` / `not_installed` / `not_authenticated` / `busy`: Execution halted. Returns failure details; Host halts execution.
+- `failed` / `timed_out` / `not_installed` / `not_authenticated`: Execution halted. Returns failure details; Host halts execution.
 - `cancelled`: The host stopped the worker with `task_cancel`.
 
 ### Progress While the Worker Runs
@@ -385,8 +386,10 @@ node src/cli.mjs mcp
 
 - `status: "running"` means the child agent is up. The payload includes `task_id`, the target, how long it has been running, and any output already printed. `session_id` is filled only after the worker CLI prints one. Resume still uses `session_id`, not `task_id`.
 - A worker that exits immediately (bad login, crash on startup) returns `failed` or `not_authenticated` in that same call. It is not reported as running.
-- `task_status` does not take the workspace lock. While the worker runs it returns elapsed time, the latest output tail, and `git_changes` so far. When the worker exits it returns the same final result `delegate_task` used to wait for (`success`, `needs_decision`, `failed`, `timed_out`).
-- `task_cancel` kills that process and returns `cancelled`. One workspace still runs one delegation at a time.
+- The same workspace can run more than one delegation at a time. The caller decides whether those tasks would write the same files. Each call returns its own `task_id`.
+- `task_wait` with a `task_id` blocks until that worker finishes, then returns the final result (`success`, `needs_decision`, `failed`, `timed_out`, `cancelled`). An already finished task returns immediately. A status file still marked `running` with no in-process task fails immediately instead of hanging. While the MCP call waits, it sends a progress notification about every 15 seconds.
+- `task_status` with a `task_id` is a peek: elapsed time, the latest output tail, and `git_changes` so far while that worker runs. When it has exited, the same call returns the final result. Without `task_id`, it follows the only live worker in this directory. If several are live, it returns `status: "running"` plus a `tasks` list (`task_id`, `target_agent`, `duration_ms`). Wait with `task_wait`. Do not poll `task_status`.
+- `task_cancel` with a `task_id` kills that process and returns `cancelled`. Without `task_id`, it cancels the only live worker. If several are live, it cancels none and returns `failed` with `task_ids`.
 
 ---
 
@@ -406,9 +409,8 @@ Baton handles CLI flag nuances across all supported targets:
 
 ## Safety & Deadlock Prevention
 
-1. **Workspace Concurrency Lock**: Only one delegated sub-task runs in a given workspace at any time, preventing concurrent write collisions.
-2. **Anti-Recursion Protection (`BATON_DELEGATION=1`)**: Child processes inherit `BATON_DELEGATION=1`. If a downstream agent tries to invoke Baton again, the bridge immediately rejects with `busy`, preventing infinite recursive loops (A -> B -> A).
-3. **PTY Simulation & Watchdogs**: Hardened timeout handlers prevent hung child processes when commands wait on interactive user prompts.
+1. **Anti-Recursion Protection (`BATON_DELEGATION=1`)**: Child processes inherit `BATON_DELEGATION=1`. If a downstream agent tries to invoke Baton again, the bridge immediately rejects with `failed`, preventing infinite recursive loops (A -> B -> A).
+2. **PTY Simulation & Watchdogs**: Hardened timeout handlers prevent hung child processes when commands wait on interactive user prompts.
 
 ---
 
@@ -449,7 +451,7 @@ npm test
 Test coverage includes:
 - Safe argument array construction (off-shell)
 - Resume command flag compatibility per CLI
-- Missing binaries, auth errors, timeouts, busy state, and recursive re-entry prevention
+- Missing binaries, auth errors, timeouts, parallel delegations in one workspace, and recursive re-entry prevention
 - Git porcelain diff parsing
 
 ---

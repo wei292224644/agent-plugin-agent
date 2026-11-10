@@ -327,7 +327,7 @@ node src/cli.mjs agents
 > “把这个重构任务 rescue 给 Codex 做”  
 > “交给 Claude 跑一下测试并修复”
 
-宿主 Agent 会调用 `delegate_task`。这一次返回发生在子进程还活着的时候，而不是等任务做完。随后用 `task_status` 看进度和最终结果。
+宿主 Agent 会调用 `delegate_task`。这一次返回发生在子进程还活着的时候，而不是等任务做完。主会话随即开一个后台子 Agent，调用 `task_wait` 守到结束。结束由宿主的子 Agent 完成通知送回。
 
 **路由规则**：
 - 用户指定了目标（如“交给 codex”）：直接派给指定 Agent。
@@ -354,8 +354,9 @@ node src/cli.mjs delegate --target codex --prompt "重构 auth 逻辑并补全�
 # 4. 从标准输入 (stdin) 读取提示词
 cat prompt.txt | node src/cli.mjs delegate --target agy
 
-# 5. 查看当前目录这一单，或停掉它
+# 5. 查看、守着或停掉派工。同一目录有多单时带上 --task <id>
 node src/cli.mjs status
+node src/cli.mjs wait --task <id>
 node src/cli.mjs cancel
 
 # 6. 启动标准 MCP 服务 (stdio 模式)
@@ -376,7 +377,7 @@ node src/cli.mjs mcp
 **返回状态 (`status`)**：
 - `success`: 任务成功。附带 `summary`、`session_id`、`git_changes`（修改文件数、增删行数）。
 - `needs_decision`: 目标 Agent 遇到了不确定的分支选择。返回包含 `question`、`options` 与 `session_id`。宿主会将问题和选项呈现给用户；得到用户选择后，**携带同一个 `session_id` 再次调用 `delegate_task`**，目标 Agent 即可在原上下文中继续推进。
-- `failed` / `timed_out` / `not_installed` / `not_authenticated` / `busy`: 异常或忙碌中断。附带错误摘要，宿主停止下发。
+- `failed` / `timed_out` / `not_installed` / `not_authenticated`: 异常中断。附带错误摘要，宿主停止下发。
 - `cancelled`: 宿主用 `task_cancel` 停掉了这一单。
 
 ### 子 Agent 跑起来之后
@@ -385,8 +386,10 @@ node src/cli.mjs mcp
 
 - `status: "running"` 表示子 Agent 已经启动。返回里有 `task_id`、目标、已运行时长，以及已经打出来的输出。`session_id` 要等对方 CLI 自己打印出来才有。续接仍用 `session_id`，不用 `task_id`。
 - 进程马上退出（没登录、一启动就崩）时，同一次调用直接返回 `failed` 或 `not_authenticated`，不会说已经跑起来。
-- `task_status` 不占工作区的锁。进行中返回时长、最近输出和目前的 `git_changes`。结束后返回以前要干等才能拿到的最终结果（`success`、`needs_decision`、`failed`、`timed_out`）。
-- `task_cancel` 杀掉该进程并返回 `cancelled`。同一个工作区同时仍只有一个派工。
+- 同一个工作区可以同时跑多单。会不会改到同一批文件，由调用方自己判断。每一单有自己的 `task_id`。
+- 带 `task_id` 的 `task_wait` 守到这一单结束，返回最终结果（`success`、`needs_decision`、`failed`、`timed_out`、`cancelled`）。已经结束的一单立刻返回。落盘仍是 `running`、但当前进程里没有这单时，立刻失败，不挂起。MCP 调用在等待期间约每 15 秒发一次进度通知。
+- 带 `task_id` 的 `task_status` 只看一眼：进行中返回时长、最近输出和目前的 `git_changes`，结束后返回最终结果。不传 `task_id` 时，这个目录只有一单在跑才看那一单。有多单在跑时返回 `status: "running"` 和 `tasks` 清单（`task_id`、`target_agent`、`duration_ms`）。等结束用 `task_wait`，不要轮询 `task_status`。
+- 带 `task_id` 的 `task_cancel` 杀掉该进程并返回 `cancelled`。不传 `task_id` 时，只有一单在跑才停它。有多单在跑时一单都不停，返回 `failed` 和 `task_ids`。
 
 ---
 
@@ -406,9 +409,8 @@ Baton 抹平了各家 CLI 的交互差异与参数格式，避免模型胡乱拼
 
 ## 安全机制与防死锁设计
 
-1. **工作区互斥并发锁**：同一工作区同一时间仅允许一个派发任务运行，避免多个子 Agent 并发写代码造成代码撕裂。
-2. **防递归死锁标记 (`BATON_DELEGATION=1`)**：子进程启动时自动注入环境变量 `BATON_DELEGATION=1`。若下游 Agent 试图再次调用 Baton 桥，桥接层直接拦截并返回 `busy`，防止 A 调 B、B 又调 A 的无限死循环。
-3. **真实 TTY 与超时断路器**：严格实施超时守护与挂起检测，防止子进程因等待交互输入而永久静默挂起。
+1. **防递归死锁标记 (`BATON_DELEGATION=1`)**：子进程启动时自动注入环境变量 `BATON_DELEGATION=1`。若下游 Agent 试图再次调用 Baton 桥，桥接层直接拦截并返回 `failed`，防止 A 调 B、B 又调 A 的无限死循环。
+2. **真实 TTY 与超时断路器**：严格实施超时守护与挂起检测，防止子进程因等待交互输入而永久静默挂起。
 
 ---
 
@@ -449,7 +451,7 @@ npm test
 测试覆盖：
 - 参数拼装安全规范（严格脱离脆弱 shell 字符串拼接）
 - 各 Agent 的首次调度与 resume 参数规范差异
-- 缺少二进制、未鉴权、并发互斥冲突、超时断路器与防重入递归拦截
+- 缺少二进制、未鉴权、同一工作区多单并行、超时断路器与防重入递归拦截
 - Git 脏状态与 Diff 解析精度
 
 ---
