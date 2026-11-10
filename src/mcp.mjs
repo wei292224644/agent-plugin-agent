@@ -10,7 +10,7 @@ function text(value) {
 }
 
 export async function startMcp() {
-  const server = new McpServer({ name: "baton", version: "0.2.0" });
+  const server = new McpServer({ name: "baton", version: "0.2.1" });
   server.registerTool(
     "list_agents",
     {
