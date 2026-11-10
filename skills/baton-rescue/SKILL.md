@@ -1,6 +1,12 @@
 ---
 name: baton-rescue
-description: Hands a bounded coding task to another local agent CLI through the baton MCP tools delegate_task, task_wait, and task_cancel. Use proactively when implementation, debugging, or a second pass should run in another agent environment, when the user says rescue or asks to hand work to Codex, Claude, Agy, or Cursor, when delegate_task returns running, and when a previous task_wait returned needs_decision for the same session.
+description: >-
+  Hands a bounded coding task to another local agent CLI through the baton MCP
+  tools delegate_task, task_wait, and task_cancel. Use proactively when
+  implementation, debugging, or a second pass should run in another agent
+  environment, when the user says rescue or asks to hand work to Codex, Claude,
+  Agy, or Cursor, when delegate_task returns running, and when a previous
+  task_wait returned needs_decision for the same session.
 ---
 
 # Baton Rescue

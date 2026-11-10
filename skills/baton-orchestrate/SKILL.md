@@ -1,6 +1,12 @@
 ---
 name: baton-orchestrate
-description: Opens a host-side orchestrator sub-agent that picks local CLIs, splits work, delegates via baton MCP (delegate_task / task_wait / task_cancel), may re-dispatch on failure, and returns a summary. Use when the user wants multi-CLI distribution, orchestration, or parallel bounded tasks—not for a single named one-shot rescue (use baton-rescue). Process-agnostic: do not require agent-skills, Speckit, or OpenSpec.
+description: >-
+  Opens a host-side orchestrator sub-agent that picks local CLIs, splits work,
+  delegates via baton MCP (delegate_task, task_wait, task_cancel), may
+  re-dispatch on failure, and returns a summary. Use when the user wants
+  multi-CLI distribution, orchestration, or parallel bounded tasks — not for a
+  single named one-shot rescue (use baton-rescue). Process-agnostic; do not
+  require agent-skills, Speckit, or OpenSpec.
 ---
 
 # Baton Orchestrate
