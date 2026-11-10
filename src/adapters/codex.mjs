@@ -11,7 +11,7 @@ export const codex = {
   },
   build({ bin, cwd, prompt, sessionId }) {
     const lastMessagePath = path.join(os.tmpdir(), `baton-codex-${process.pid}-${Date.now()}.txt`);
-    // shortcut: `exec resume` 不接受 --sandbox/--cd/--color，升级 Codex 后再并回首次命令的参数。
+    // `exec resume` 不接受 --cd/--color。--approve-for-me 已使用 workspace-write，不要再加 --sandbox。
     if (sessionId) {
       return {
         command: bin,
@@ -36,8 +36,6 @@ export const codex = {
         "--json",
         "--color",
         "never",
-        "--sandbox",
-        "workspace-write",
         "--approve-for-me",
         "--skip-git-repo-check",
         "--cd",

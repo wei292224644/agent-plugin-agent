@@ -399,7 +399,7 @@ Baton 抹平了各家 CLI 的交互差异与参数格式，避免模型胡乱拼
 
 | Agent | 首次调用命令规范 | 会话续接 (Resume) 规范 | 关键注意项 |
 | :--- | :--- | :--- | :--- |
-| **Codex** | `codex exec --json --color never --sandbox workspace-write --approve-for-me --cd <cwd> -` | `codex exec resume --json <thread_id> -` | `exec resume` 不接受 `--sandbox`、`--cd`、`--color`。严禁加 `--ephemeral`。 |
+| **Codex** | `codex exec --json --color never --approve-for-me --cd <cwd> -` | `codex exec resume --json <thread_id> -` | `--approve-for-me` 已使用 workspace-write 沙箱，且在 codex-cli 0.167.0 上与 `--sandbox` 互斥。`exec resume` 不接受 `--sandbox`、`--cd`、`--color`。严禁加 `--ephemeral`。 |
 | **Claude Code** | `claude -p --output-format json --permission-mode acceptEdits --permission-prompts none` | 追加 `--resume <session_id>` | 走非交互 `-p` 模式并静默确认。 |
 | **Gemini** | `gemini -p <prompt> --output-format json --skip-trust --approval-mode auto_edit` | 追加 `--resume <session_id>` | 跳过可信提示，开启自动编辑确认。 |
 | **Antigravity (agy)** | `agy --print <prompt> --mode accept-edits --output-format json` | 追加 `--conversation <conversation_id>` | 自动接受代码变更。 |

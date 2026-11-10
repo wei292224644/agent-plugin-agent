@@ -399,7 +399,7 @@ Baton handles CLI flag nuances across all supported targets:
 
 | Agent | Initial Invocation Command | Session Resumption (`--resume`) | Critical Notes |
 | :--- | :--- | :--- | :--- |
-| **Codex** | `codex exec --json --color never --sandbox workspace-write --approve-for-me --cd <cwd> -` | `codex exec resume --json <thread_id> -` | `exec resume` does not accept `--sandbox`, `--cd`, or `--color`. Never add `--ephemeral`. |
+| **Codex** | `codex exec --json --color never --approve-for-me --cd <cwd> -` | `codex exec resume --json <thread_id> -` | `--approve-for-me` already uses the workspace-write sandbox and conflicts with `--sandbox` on codex-cli 0.167.0. `exec resume` does not accept `--sandbox`, `--cd`, or `--color`. Never add `--ephemeral`. |
 | **Claude Code** | `claude -p --output-format json --permission-mode acceptEdits --permission-prompts none` | Appends `--resume <session_id>` | Runs in headless non-interactive mode. |
 | **Gemini** | `gemini -p <prompt> --output-format json --skip-trust --approval-mode auto_edit` | Appends `--resume <session_id>` | Skips trust prompts with auto-edit approval. |
 | **Antigravity (agy)** | `agy --print <prompt> --mode accept-edits --output-format json` | Appends `--conversation <conversation_id>` | Automatically accepts edits in print mode. |
