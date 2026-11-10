@@ -93,59 +93,13 @@ class Capture {
   }
 }
 
-function lockFile(cwd) {
-  const hash = crypto.createHash("sha256").update(path.resolve(cwd)).digest("hex").slice(0, 16);
-  return path.join(os.tmpdir(), `baton-${hash}.lock`);
+function workspaceHash(cwd) {
+  return crypto.createHash("sha256").update(path.resolve(cwd)).digest("hex").slice(0, 16);
 }
 
-function pidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code === "EPERM";
-  }
-}
-
-function acquire(cwd) {
-  const file = lockFile(cwd);
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const fd = fs.openSync(file, "wx");
-      fs.writeFileSync(fd, String(process.pid));
-      return { file, fd };
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      let owner = Number.NaN;
-      try {
-        owner = Number(fs.readFileSync(file, "utf8"));
-      } catch {
-        owner = Number.NaN;
-      }
-      if (pidAlive(owner)) return null;
-      try {
-        fs.unlinkSync(file);
-      } catch {
-        return null;
-      }
-    }
-  }
-  return null;
-}
-
-function release(lock) {
-  if (!lock) return;
-  try {
-    fs.closeSync(lock.fd);
-  } catch {
-    // Already closed.
-  }
-  try {
-    fs.unlinkSync(lock.file);
-  } catch {
-    // Another run may already have removed a stale lock.
-  }
+function statusFile(cwd, taskId) {
+  if (!/^[0-9a-f-]{36}$/i.test(taskId)) return null;
+  return path.join(os.tmpdir(), `baton-${workspaceHash(cwd)}.${taskId}.status.json`);
 }
 
 function killChild(child) {
@@ -164,18 +118,10 @@ function killChild(child) {
 
 const tasks = new Map();
 
-function taskKey(cwd) {
-  return `cwd:${path.resolve(cwd)}`;
-}
-
-function statusFile(cwd) {
-  return lockFile(cwd).replace(/\.lock$/, ".status.json");
-}
-
 function publish(record, view) {
   record.view = view;
   try {
-    fs.writeFileSync(statusFile(record.cwd), JSON.stringify(view));
+    fs.writeFileSync(statusFile(record.cwd, record.taskId), JSON.stringify(view));
   } catch {
     // The temp directory can reject the write. The in-memory view still works.
   }
@@ -183,20 +129,69 @@ function publish(record, view) {
 
 function track(record) {
   tasks.set(record.taskId, record);
-  tasks.set(taskKey(record.cwd), record);
 }
 
-function readStatusFile(cwd) {
+function readStatusFile(cwd, taskId) {
+  const file = statusFile(cwd, taskId);
+  if (!file) return null;
   try {
-    return { fileOnly: true, view: JSON.parse(fs.readFileSync(statusFile(cwd), "utf8")) };
+    return { fileOnly: true, view: JSON.parse(fs.readFileSync(file, "utf8")) };
   } catch {
     return null;
   }
 }
 
-function lookup(taskId, cwd) {
-  if (taskId) return tasks.get(taskId) || null;
-  return tasks.get(taskKey(cwd)) || readStatusFile(cwd);
+function memoryRecords(cwd) {
+  const resolved = path.resolve(cwd);
+  return [...tasks.values()].filter((record) => record.cwd === resolved);
+}
+
+function latestByStarted(records) {
+  return records.reduce((best, record) => (record.started >= best.started ? record : best));
+}
+
+function statusSnapshots(cwd) {
+  const prefix = `baton-${workspaceHash(cwd)}.`;
+  const suffix = ".status.json";
+  let names;
+  try {
+    names = fs.readdirSync(os.tmpdir());
+  } catch {
+    return [];
+  }
+  const snapshots = [];
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !name.endsWith(suffix)) continue;
+    const taskId = name.slice(prefix.length, -suffix.length);
+    if (!taskId) continue;
+    try {
+      const file = path.join(os.tmpdir(), name);
+      snapshots.push({
+        taskId,
+        mtime: fs.statSync(file).mtimeMs,
+        view: JSON.parse(fs.readFileSync(file, "utf8")),
+      });
+    } catch {
+      // A partial or unreadable snapshot is skipped.
+    }
+  }
+  return snapshots;
+}
+
+function runningList(items) {
+  return {
+    status: "running",
+    summary: "这个工作区有多单在跑，请指定 task_id。",
+    tasks: items,
+  };
+}
+
+function snapshotTask(snapshot) {
+  return {
+    task_id: snapshot.view.task_id || snapshot.taskId,
+    target_agent: snapshot.view.target_agent,
+    duration_ms: snapshot.view.duration_ms,
+  };
 }
 
 function startProcess(spec, timeoutMs, spawnImpl) {
@@ -342,6 +337,7 @@ function complete(record, view) {
   if (record.final) return record.final;
   record.final = view;
   publish(record, view);
+  record.settle?.(view);
   if (record.lastMessagePath) {
     try {
       fs.unlinkSync(record.lastMessagePath);
@@ -349,8 +345,6 @@ function complete(record, view) {
       // The CLI may not have created the file.
     }
   }
-  release(record.lock);
-  record.lock = null;
   return view;
 }
 
@@ -392,9 +386,6 @@ export async function delegate(input, deps = {}) {
     return pack({ status: "failed", summary: "缺少 prompt。" });
   }
 
-  const lock = acquire(cwd);
-  if (!lock) return pack({ status: "busy", summary: "这个工作区已有派工在跑。" });
-
   let spec;
   try {
     spec = adapter.build({
@@ -404,7 +395,6 @@ export async function delegate(input, deps = {}) {
       sessionId: input.sessionId || null,
     });
   } catch (error) {
-    release(lock);
     return pack({ status: "failed", summary: error.message });
   }
 
@@ -422,11 +412,13 @@ export async function delegate(input, deps = {}) {
     sessionId: input.sessionId || null,
     before: gitSnapshot(cwd),
     lastMessagePath: spec.lastMessagePath || null,
-    lock,
     proc,
     final: null,
     cancelled: false,
   };
+  record.settled = new Promise((resolve) => {
+    record.settle = resolve;
+  });
   track(record);
   await Promise.resolve();
   if (proc.isSettled()) return complete(record, describe(record, await proc.done));
@@ -437,34 +429,122 @@ export async function delegate(input, deps = {}) {
   return view;
 }
 
-function locate(input = {}) {
+function resolveCwd(input = {}) {
   const env = input.env ?? process.env;
-  const cwd = path.resolve(input.cwd || env.BATON_CWD || process.cwd());
-  return { cwd, record: lookup(input.taskId, cwd) };
+  return path.resolve(input.cwd || env.BATON_CWD || process.cwd());
 }
 
-export function taskStatus(input = {}) {
-  const { record } = locate(input);
-  if (!record) {
-    return {
-      status: "failed",
-      task_id: input.taskId || null,
-      summary: "没有这一单派工。",
-    };
-  }
-  if (record.fileOnly) return record.view;
+function viewOf(record) {
   if (record.final) return record.final;
   const view = runningView(record);
   publish(record, view);
   return view;
 }
 
-export function taskCancel(input = {}) {
-  const { record } = locate(input);
+const WAIT_PROGRESS_MS = 15_000;
+
+function progressLine(view) {
+  const line = String(view?.output || view?.summary || "").trim().split("\n").filter(Boolean).pop() || "";
+  return line.slice(0, 200);
+}
+
+export function progressNotification(extra, step, view) {
+  const token = extra?._meta?.progressToken;
+  if (token == null) return null;
+  return {
+    method: "notifications/progress",
+    params: {
+      progressToken: token,
+      progress: step,
+      message: progressLine(view),
+    },
+  };
+}
+
+export async function taskWait(input = {}) {
+  const cwd = resolveCwd(input);
+  const taskId = input.taskId;
+  if (!taskId) return { status: "failed", task_id: null, summary: "缺少 task_id。" };
+
+  const record = tasks.get(taskId);
+  if (!record) {
+    const stored = readStatusFile(cwd, taskId);
+    if (stored && stored.view?.status !== "running") return stored.view;
+    return {
+      status: "failed",
+      task_id: taskId,
+      summary: stored ? "这一单不在当前进程里，没法守着。" : "没有这一单派工。",
+    };
+  }
+  if (record.final) return record.final;
+
+  const onProgress = input.onProgress;
+  let stopped = false;
+  const beat = () => {
+    if (stopped || record.final) return;
+    const view = viewOf(record);
+    if (stopped || view.status !== "running") return;
+    try {
+      Promise.resolve(onProgress?.(view)).catch(() => {});
+    } catch {
+      // Progress is a hint. A throw must not end the wait.
+    }
+  };
+  const timer = onProgress ? setInterval(beat, input.intervalMs ?? WAIT_PROGRESS_MS) : null;
+  if (onProgress) beat();
+  try {
+    return await record.settled;
+  } finally {
+    stopped = true;
+    if (timer) clearInterval(timer);
+  }
+}
+
+export function taskStatus(input = {}) {
+  const cwd = resolveCwd(input);
+  if (input.taskId) {
+    const record = tasks.get(input.taskId);
+    if (record) return viewOf(record);
+    const stored = readStatusFile(cwd, input.taskId);
+    if (stored) return stored.view;
+    return {
+      status: "failed",
+      task_id: input.taskId,
+      summary: "没有这一单派工。",
+    };
+  }
+
+  const records = memoryRecords(cwd);
+  const live = records.filter((record) => !record.final);
+  if (live.length === 1) return viewOf(live[0]);
+  if (live.length > 1) {
+    return runningList(live.map((record) => ({
+      task_id: record.taskId,
+      target_agent: record.target,
+      duration_ms: Date.now() - record.started,
+    })));
+  }
+  if (records.length) return latestByStarted(records).final;
+
+  const snapshots = statusSnapshots(cwd);
+  const running = snapshots.filter((snapshot) => snapshot.view?.status === "running");
+  if (running.length === 1) return running[0].view;
+  if (running.length > 1) return runningList(running.map(snapshotTask));
+  if (snapshots.length) {
+    return snapshots.reduce((best, snapshot) => (snapshot.mtime >= best.mtime ? snapshot : best)).view;
+  }
+  return {
+    status: "failed",
+    task_id: null,
+    summary: "没有这一单派工。",
+  };
+}
+
+function cancelRecord(record, taskId) {
   if (!record || record.fileOnly) {
     return {
       status: "failed",
-      task_id: input.taskId || null,
+      task_id: taskId || null,
       summary: "没有可取消的派工。",
     };
   }
@@ -478,4 +558,48 @@ export function taskCancel(input = {}) {
     stderr: record.proc.output().stderr,
     timedOut: false,
   }));
+}
+
+export function taskCancel(input = {}) {
+  const cwd = resolveCwd(input);
+  if (input.taskId) {
+    return cancelRecord(tasks.get(input.taskId), input.taskId);
+  }
+
+  const records = memoryRecords(cwd);
+  const live = records.filter((record) => !record.final);
+  if (live.length > 1) {
+    return {
+      status: "failed",
+      summary: "有多单在跑，请指定 task_id。",
+      task_ids: live.map((record) => record.taskId),
+    };
+  }
+  if (live.length === 1) return cancelRecord(live[0], live[0].taskId);
+  if (records.length) return latestByStarted(records).final;
+
+  const snapshots = statusSnapshots(cwd);
+  const running = snapshots.filter((snapshot) => snapshot.view?.status === "running");
+  if (running.length > 1) {
+    return {
+      status: "failed",
+      summary: "有多单在跑，请指定 task_id。",
+      task_ids: running.map((snapshot) => snapshot.view.task_id || snapshot.taskId),
+    };
+  }
+  if (running.length === 1) {
+    return {
+      status: "failed",
+      task_id: running[0].view.task_id || running[0].taskId,
+      summary: "没有可取消的派工。",
+    };
+  }
+  if (snapshots.length) {
+    return snapshots.reduce((best, snapshot) => (snapshot.mtime >= best.mtime ? snapshot : best)).view;
+  }
+  return {
+    status: "failed",
+    task_id: null,
+    summary: "没有可取消的派工。",
+  };
 }

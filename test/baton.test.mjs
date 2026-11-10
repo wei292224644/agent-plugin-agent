@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -5,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { delegate, interpret, taskCancel, taskStatus } from "../src/runner.mjs";
+import { delegate, interpret, progressNotification, taskCancel, taskStatus, taskWait } from "../src/runner.mjs";
 import { gitChanges, gitSnapshot } from "../src/git.mjs";
 
 function binDir(name) {
@@ -150,7 +151,7 @@ test("cursor prefers cursor-agent and passes --resume", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("missing binary, auth failure, timeout, busy, and re-entry", async () => {
+test("missing binary, auth failure, timeout, parallel runs, and re-entry", async () => {
   const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-work-"));
   const missing = await delegate({
     target: "codex",
@@ -204,27 +205,59 @@ test("missing binary, auth failure, timeout, busy, and re-entry", async () => {
   }
   assert.equal(later.status, "timed_out");
 
-  let release;
-  const first = await delegate(
-    { target: "claude", prompt: "hold", cwd, env: { ...process.env, PATH: dir } },
-    {
-      spawnImpl: () => {
-        const proc = child();
-        release = () => proc.emit("close", 0);
-        return proc;
+  let firstProc;
+  let secondProc;
+  let first;
+  let second;
+  try {
+    first = await delegate(
+      { target: "claude", prompt: "hold", cwd, env: { ...process.env, PATH: dir } },
+      {
+        spawnImpl: () => {
+          firstProc = child();
+          return firstProc;
+        },
       },
-    },
-  );
-  assert.equal(first.status, "running");
-  const second = await delegate(
-    { target: "claude", prompt: "other", cwd, env: { ...process.env, PATH: dir } },
-    { spawnImpl: () => child() },
-  );
-  assert.equal(second.status, "busy");
-  release();
-  await new Promise((resolve) => setImmediate(resolve));
-  const held = taskStatus({ taskId: first.task_id, cwd });
-  assert.equal(held.status, "success");
+    );
+    assert.equal(first.status, "running");
+    second = await delegate(
+      { target: "claude", prompt: "other", cwd, env: { ...process.env, PATH: dir } },
+      {
+        spawnImpl: () => {
+          secondProc = child();
+          return secondProc;
+        },
+      },
+    );
+    assert.equal(second.status, "running");
+    firstProc.stdout.emit("data", "服务器模块\n");
+    secondProc.stdout.emit("data", "文档任务\n");
+    const firstView = taskStatus({ taskId: first.task_id, cwd });
+    const secondView = taskStatus({ taskId: second.task_id, cwd });
+    assert.match(firstView.output, /服务器模块/);
+    assert.doesNotMatch(firstView.output, /文档任务/);
+    assert.match(secondView.output, /文档任务/);
+    assert.doesNotMatch(secondView.output, /服务器模块/);
+    const listed = taskStatus({ cwd });
+    assert.equal(listed.status, "running");
+    assert.deepEqual(
+      listed.tasks.map((item) => item.task_id).sort(),
+      [first.task_id, second.task_id].sort(),
+    );
+    const refused = taskCancel({ cwd });
+    assert.equal(refused.status, "failed");
+    assert.deepEqual([...refused.task_ids].sort(), [first.task_id, second.task_id].sort());
+    assert.equal(taskStatus({ taskId: first.task_id, cwd }).status, "running");
+    assert.equal(taskStatus({ taskId: second.task_id, cwd }).status, "running");
+    assert.equal(taskCancel({ taskId: first.task_id, cwd }).status, "cancelled");
+    assert.equal(taskStatus({ taskId: second.task_id, cwd }).status, "running");
+    secondProc.emit("close", 0);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(taskStatus({ taskId: second.task_id, cwd }).status, "success");
+  } finally {
+    if (first?.task_id) taskCancel({ taskId: first.task_id, cwd });
+    if (second?.task_id) taskCancel({ taskId: second.task_id, cwd });
+  }
 
   rmSync(dir, { recursive: true, force: true });
   rmSync(cwd, { recursive: true, force: true });
@@ -298,6 +331,107 @@ test("a living child is reported only after it starts, then can be queried and c
     rmSync(dir, { recursive: true, force: true });
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+function waitTimeout(promise, ms = 1000) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("taskWait hung")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function statusPath(cwd, taskId) {
+  const hash = crypto.createHash("sha256").update(path.resolve(cwd)).digest("hex").slice(0, 16);
+  return path.join(os.tmpdir(), `baton-${hash}.${taskId}.status.json`);
+}
+
+test("taskWait blocks until the worker finishes and survives a throwing progress callback", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-wait-"));
+  const dir = binDir("claude");
+  let proc;
+  const started = await delegate(
+    { target: "claude", prompt: "写模块", cwd, env: { ...process.env, PATH: dir } },
+    {
+      spawnImpl: () => {
+        proc = child();
+        return proc;
+      },
+    },
+  );
+  const seen = [];
+  const waiting = waitTimeout(taskWait({
+    taskId: started.task_id,
+    cwd,
+    intervalMs: 10,
+    onProgress(view) {
+      seen.push(view.status);
+      throw new Error("progress dropped");
+    },
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 35));
+  proc.stdout.emit("data", "{\"result\":\"APA_RESULT\\nsummary: 写完了\\nAPA_END\"}");
+  proc.emit("close", 0);
+  const done = await waiting;
+  assert.equal(done.status, "success");
+  assert.equal(done.summary, "写完了");
+  assert.ok(seen.length >= 2);
+  assert.ok(seen.every((status) => status === "running"));
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test("taskWait returns a cancelled task and an already finished task without hanging", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-wait-"));
+  const dir = binDir("claude");
+  const started = await delegate(
+    { target: "claude", prompt: "停", cwd, env: { ...process.env, PATH: dir } },
+    { spawnImpl: () => child() },
+  );
+  const waiting = waitTimeout(taskWait({ taskId: started.task_id, cwd }));
+  assert.equal(taskCancel({ taskId: started.task_id, cwd }).status, "cancelled");
+  assert.equal((await waiting).status, "cancelled");
+
+  const finished = await delegate(
+    { target: "claude", prompt: "快", cwd, env: { ...process.env, PATH: dir } },
+    { spawnImpl: spawnOk({ result: "APA_RESULT\nsummary: 立刻好了\nAPA_END" }) },
+  );
+  assert.equal(finished.status, "success");
+  const again = await waitTimeout(taskWait({ taskId: finished.task_id, cwd }));
+  assert.equal(again.status, "success");
+  assert.equal(again.summary, "立刻好了");
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test("taskWait fails closed when the task cannot be waited on", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-wait-"));
+  assert.equal((await taskWait({ cwd })).summary, "缺少 task_id。");
+  assert.equal((await taskWait({ taskId: "missing-task", cwd })).summary, "没有这一单派工。");
+
+  const doneId = "11111111-1111-1111-1111-111111111111";
+  const runningId = "22222222-2222-2222-2222-222222222222";
+  const doneFile = statusPath(cwd, doneId);
+  const runningFile = statusPath(cwd, runningId);
+  writeFileSync(doneFile, JSON.stringify({ status: "success", task_id: doneId, summary: "落盘" }));
+  writeFileSync(runningFile, JSON.stringify({ status: "running", task_id: runningId, summary: "子 Agent 已启动。" }));
+  try {
+    assert.equal((await taskWait({ taskId: doneId, cwd })).summary, "落盘");
+    assert.equal((await taskWait({ taskId: runningId, cwd })).summary, "这一单不在当前进程里，没法守着。");
+  } finally {
+    rmSync(doneFile, { force: true });
+    rmSync(runningFile, { force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("progressNotification is empty without a progress token", () => {
+  const view = { output: "第一行\n正在写测试\n", summary: "子 Agent 已启动。" };
+  assert.equal(progressNotification({}, 1, view), null);
+  assert.deepEqual(progressNotification({ _meta: { progressToken: "tok" } }, 2, view), {
+    method: "notifications/progress",
+    params: { progressToken: "tok", progress: 2, message: "正在写测试" },
+  });
 });
 
 test("gitChanges reports only paths whose porcelain line changed", () => {
