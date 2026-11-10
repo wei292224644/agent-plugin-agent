@@ -14,15 +14,15 @@ const CAPTURE_TAIL = 262_144;
 export const OUTPUT_CONTRACT = [
   "完成前用下面两种结尾之一。标记必须各占一行。",
   "需要用户做选择时停下来，不要猜，也不要继续后面的步骤：",
-  "APA_DECISION",
+  "BATON_DECISION",
   "question: <一个问题>",
   "options: <选项A> | <选项B>",
-  "APA_END",
+  "BATON_END",
   "",
   "做完时：",
-  "APA_RESULT",
+  "BATON_RESULT",
   "summary: <做了什么>",
-  "APA_END",
+  "BATON_END",
   "",
   "不要再调用其他 Agent。",
 ].join("\n");
@@ -36,7 +36,7 @@ export function buildPrompt(prompt, files) {
 
 export function interpret(text) {
   if (!text) return null;
-  const re = /APA_(DECISION|RESULT)\r?\n([\s\S]*?)\r?\nAPA_END/g;
+  const re = /(?:APA|BATON)_(DECISION|RESULT)\r?\n([\s\S]*?)\r?\n(?:APA|BATON)_END/g;
   let last = null;
   for (const match of text.matchAll(re)) last = match;
   if (!last) return null;
@@ -321,14 +321,30 @@ function describe(record, ran) {
 
 function runningView(record) {
   const snap = record.proc.output();
-  const message = record.adapter.messageFrom(snap.stdout, "");
-  const sessionId = record.adapter.sessionIdFrom(snap.stdout) || null;
+  const raw = snap.stdout || "";
+  let lastMessage = "";
+  if (record.lastMessagePath) {
+    try {
+      lastMessage = fs.readFileSync(record.lastMessagePath, "utf8");
+    } catch {
+      lastMessage = "";
+    }
+  }
+  const fromAdapter = record.adapter.messageFrom(raw, lastMessage);
+  const output = tailText(fromAdapter || raw);
+  if (raw !== record.lastStdout || output !== record.lastOutputText) {
+    record.lastStdout = raw;
+    record.lastOutputText = output;
+    if (output) record.lastOutputAt = Date.now();
+  }
+  const sessionId = record.adapter.sessionIdFrom(raw) || null;
   return {
     task_id: record.taskId,
     ...blank(record.target, record.started, sessionId),
     status: "running",
-    output: tailText(message || snap.stdout),
-    summary: "子 Agent 已启动。",
+    output,
+    last_output_at: record.lastOutputAt || null,
+    summary: output ? "子 Agent 输出中。" : "子 Agent 已启动。",
     git_changes: gitChanges(record.cwd, record.before, gitSnapshot(record.cwd)),
   };
 }

@@ -388,7 +388,7 @@ node src/cli.mjs mcp
 - 进程马上退出（没登录、一启动就崩）时，同一次调用直接返回 `failed` 或 `not_authenticated`，不会说已经跑起来。
 - 同一个工作区可以同时跑多单。会不会改到同一批文件，由调用方自己判断。每一单有自己的 `task_id`。
 - 带 `task_id` 的 `task_wait` 守到这一单结束，返回最终结果（`success`、`needs_decision`、`failed`、`timed_out`、`cancelled`）。已经结束的一单立刻返回。落盘仍是 `running`、但当前进程里没有这单时，立刻失败，不挂起。MCP 调用在等待期间约每 15 秒发一次进度通知。
-- 带 `task_id` 的 `task_status` 只看一眼：进行中返回时长、最近输出和目前的 `git_changes`，结束后返回最终结果。不传 `task_id` 时，这个目录只有一单在跑才看那一单。有多单在跑时返回 `status: "running"` 和 `tasks` 清单（`task_id`、`target_agent`、`duration_ms`）。等结束用 `task_wait`，不要轮询 `task_status`。
+- 带 `task_id` 的 `task_status` 只看一眼：进行中返回时长、最近输出、`last_output_at` 和目前的 `git_changes`，结束后返回最终结果。流式 JSON 会取最近一条完整消息；解不出时回退到原始输出尾部。不传 `task_id` 时，这个目录只有一单在跑才看那一单。有多单在跑时返回 `status: "running"` 和 `tasks` 清单（`task_id`、`target_agent`、`duration_ms`）。等结束用 `task_wait`，不要轮询 `task_status`。
 - 带 `task_id` 的 `task_cancel` 杀掉该进程并返回 `cancelled`。不传 `task_id` 时，只有一单在跑才停它。有多单在跑时一单都不停，返回 `failed` 和 `task_ids`。
 
 ---
