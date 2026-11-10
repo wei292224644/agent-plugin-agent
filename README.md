@@ -376,7 +376,7 @@ node src/cli.mjs mcp
 - `target_agent`: `codex` | `claude` | `gemini` | `agy` | `cursor`
 - `prompt`: Standalone, self-contained task specification
 - `files`: (Optional) Key file paths to focus on
-- `timeout_seconds`: Execution timeout (default 300s, max 1800s)
+- `timeout_seconds`: Execution timeout (default 300s, max 1800s). Returns `effective_timeout_seconds` after clamping. On `timed_out`, `summary` includes the worker output tail and `next` tells the host to resume with the same `session_id` and a larger timeout.
 - `session_id`: (Optional) Previous session ID for conversation resumption
 
 **Return Status (`status`)**:

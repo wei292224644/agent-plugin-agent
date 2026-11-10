@@ -376,7 +376,7 @@ node src/cli.mjs mcp
 - `target_agent`: `codex` | `claude` | `gemini` | `agy` | `cursor`
 - `prompt`: 独立、自洽的任务描述
 - `files`: （可选）子任务需要重点关注的文件路径列表
-- `timeout_seconds`: 超时时间（默认 300 秒，上限 1800 秒）
+- `timeout_seconds`: 超时时间（默认 300 秒，上限 1800 秒）。返回 `effective_timeout_seconds`（压顶后实际生效值）。`timed_out` 时 `summary` 含输出尾部，`next` 提示用同一 `session_id` 加大超时续做。
 - `session_id`: （可选）前次任务的会话 ID，用于会话续接
 
 **返回状态 (`status`)**：

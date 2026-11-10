@@ -62,7 +62,9 @@ Rules:
 - Do not require Speckit / OpenSpec / agent-skills; if the workspace already has rules, copy them into worker prompts, otherwise omit
 - Do not delegate to the CLI vendor this host session already is
 - Default max 3 jobs running at once; ask the host before going higher
+- timeout_seconds defaults to 300 and caps at 1800. Long subtasks (migration, real-env verify, multi-file rewrite) must pass timeout_seconds explicitly; check effective_timeout_seconds on the return
 - Default on failure: switch vendor once; do not dual-run the same edit without cause
+- On timed_out: relay summary and next; prefer resume with the same session_id and a larger timeout_seconds before switching vendor
 - Serialize jobs that would touch overlapping paths; path-disjoint jobs may run in parallel
 - After each running job, task_wait until it ends (same session in order, or spawn a watcher whose only job is task_wait)
 - needs_decision: return question/options to the host, wait for the user, then resume with the same session_id; do not choose for the user
@@ -72,8 +74,8 @@ Steps:
 1. list_agents; only use installed targets
 2. Split into bounded subtasks (self-contained prompt + suggested files each)
 3. Pick target_agent and say why in one sentence
-4. delegate_task; keep task_id
-5. task_wait; on failed/timed_out, re-dispatch the same subtask once to another vendor
+4. delegate_task with an explicit timeout_seconds when the subtask may exceed 5 minutes; keep task_id
+5. task_wait; on timed_out, resume once with the same session_id and a larger timeout_seconds; on failed, re-dispatch once to another vendor
 6. Summarize after every job is terminal
 ```
 

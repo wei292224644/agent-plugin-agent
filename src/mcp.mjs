@@ -23,12 +23,15 @@ export async function startMcp() {
     "delegate_task",
     {
       description:
-        "把一个有边界的任务派给本机另一个 AI CLI，花对方订阅里的额度。子 Agent 进程还活着才返回 running 和 task_id。同一工作区可以同时派多单。主会话拿到 task_id 后开一个后台子 Agent 调 task_wait 守到结束，不要轮询，也不要挂 shell。要停用 task_cancel。返回 needs_decision 时，把用户的选择和同一个 session_id 再派一次。不要派小改动。",
+        "把一个有边界的任务派给本机另一个 AI CLI，花对方订阅里的额度。子 Agent 进程还活着才返回 running 和 task_id。同一工作区可以同时派多单。主会话拿到 task_id 后开一个后台子 Agent 调 task_wait 守到结束，不要轮询，也不要挂 shell。要停用 task_cancel。返回 needs_decision 时，把用户的选择和同一个 session_id 再派一次。不要派小改动。timeout_seconds 默认 300，上限 1800；返回里带 effective_timeout_seconds。timed_out 时 summary 含输出尾部，next 提示用同一 session_id 加大 timeout_seconds 续做。",
       inputSchema: z.object({
         target_agent: z.enum(targets),
         prompt: z.string(),
         files: z.array(z.string()).optional(),
-        timeout_seconds: z.number().optional(),
+        timeout_seconds: z
+          .number()
+          .optional()
+          .describe("超时秒数。默认 300，上限 1800；超过上限会被压到 1800，返回 effective_timeout_seconds。"),
         session_id: z.string().optional(),
       }),
     },
