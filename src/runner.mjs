@@ -178,6 +178,14 @@ function statusSnapshots(cwd) {
   return snapshots;
 }
 
+function nextForRunning(taskId) {
+  return `开一个宿主后台子 Agent，调用 task_wait(task_id="${taskId}")，把返回原样交回；主会话不要等待，也不要轮询 task_status。`;
+}
+
+function nextForDecision() {
+  return "把 question 和 options 交给用户；拿到选择后用同一个 session_id 再调 delegate_task。";
+}
+
 function runningList(items) {
   return {
     status: "running",
@@ -310,6 +318,7 @@ function describe(record, ran) {
       question: marker.question,
       options: marker.options,
       summary: marker.question,
+      next: nextForDecision(),
     });
   }
   if (ran.exitCode === 0 && !record.adapter.failed(ran.stdout)) {
@@ -442,7 +451,7 @@ export async function delegate(input, deps = {}) {
   proc.done.then((ran) => complete(record, describe(record, ran)));
   const view = runningView(record);
   publish(record, view);
-  return view;
+  return { ...view, next: nextForRunning(record.taskId) };
 }
 
 function resolveCwd(input = {}) {
