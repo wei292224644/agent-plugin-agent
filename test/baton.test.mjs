@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -585,4 +585,14 @@ test("running task_status keeps stream output and last_output_at", async () => {
     rmSync(dir, { recursive: true, force: true });
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test("baton skills ship with orchestrate and rescue frontmatter", () => {
+  const rescue = readFileSync(path.join(import.meta.dirname, "../skills/baton-rescue/SKILL.md"), "utf8");
+  const orchestrate = readFileSync(path.join(import.meta.dirname, "../skills/baton-orchestrate/SKILL.md"), "utf8");
+  assert.match(rescue, /^name:\s*baton-rescue\s*$/m);
+  assert.match(orchestrate, /^name:\s*baton-orchestrate\s*$/m);
+  assert.match(orchestrate, /list_agents/);
+  assert.match(orchestrate, /不绑定/);
+  assert.match(rescue, /baton-orchestrate/);
 });

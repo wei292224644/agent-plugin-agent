@@ -7,6 +7,8 @@ description: Hands a bounded coding task to another local agent CLI through the 
 
 把一块有边界的工作下放到另一家本地 CLI。主会话调用 MCP 工具 `delegate_task`。这一下马上返回。子进程还在跑时，主会话开一个后台子 Agent 去守 `task_wait`，自己不要等，也不要轮询。不要自己拼 shell，也不要自己把这块做完。
 
+要拆多单、并行、失败换家、由代理选 CLI：改用 `baton-orchestrate`。
+
 ## 什么时候下放
 
 下放：
