@@ -676,4 +676,65 @@ test("baton skills ship with orchestrate and rescue frontmatter", () => {
   assert.match(orchestrate, /needs_decision/);
   assert.doesNotMatch(rescue, /[\u4e00-\u9fff]/);
   assert.doesNotMatch(orchestrate, /[\u4e00-\u9fff]/);
+  assert.match(orchestrate, /quota_exceeded/);
+  assert.match(rescue, /quota_exceeded/);
+});
+
+function exitSoon(stdout, stderr, code = 1) {
+  return () => {
+    const proc = child();
+    queueMicrotask(() => {
+      if (stdout) proc.stdout.emit("data", stdout);
+      if (stderr) proc.stderr.emit("data", stderr);
+      proc.emit("close", code);
+    });
+    return proc;
+  };
+}
+
+test("failure summary prefers the terminal error", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-work-"));
+  const dir = binDir("codex");
+  const claude = binDir("claude");
+  try {
+    const quota = await delegate(
+      { target: "codex", prompt: "hi", cwd, env: { ...process.env, PATH: dir } },
+      {
+        spawnImpl: exitSoon(
+          "turn.failed: You've hit your usage limit. try again at 12:46 PM.\n",
+          "rmcp transport error\n<!DOCTYPE html><html><body>bad gateway</body></html>\n",
+        ),
+      },
+    );
+    assert.equal(quota.status, "quota_exceeded");
+    assert.match(quota.summary, /usage limit/i);
+    assert.doesNotMatch(quota.summary, /rmcp/i);
+    assert.doesNotMatch(quota.summary, /<html/i);
+    assert.match(quota.output, /usage limit/i);
+
+    const disk = await delegate(
+      { target: "codex", prompt: "hi", cwd, env: { ...process.env, PATH: dir } },
+      { spawnImpl: exitSoon("turn.failed: disk full\n", "<html>nope</html>\n") },
+    );
+    assert.equal(disk.status, "failed");
+    assert.match(disk.summary, /disk full/);
+    assert.doesNotMatch(disk.summary, /<html/i);
+
+    const plain = await delegate(
+      { target: "codex", prompt: "hi", cwd, env: { ...process.env, PATH: dir } },
+      { spawnImpl: exitSoon("", "compiler error: boom\n") },
+    );
+    assert.equal(plain.status, "failed");
+    assert.match(plain.summary, /boom/);
+
+    const auth = await delegate(
+      { target: "claude", prompt: "hi", cwd, env: { ...process.env, PATH: claude } },
+      { spawnImpl: exitSoon("", "Please run /login\n") },
+    );
+    assert.equal(auth.status, "not_authenticated");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(claude, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

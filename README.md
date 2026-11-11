@@ -77,7 +77,8 @@ Installation differs by harness. Simply copy and paste the commands for your pre
 
 1. **Node.js** >= 18
 2. At least one supported Agent CLI installed and logged in locally (`codex`, `claude`, `agy`, `cursor`, or `gemini`).
-3. (Optional) If installing from local source or developing:
+3. After a marketplace install, run `/baton:setup` in the host session. Marketplace install does not run `npm install`; without this step MCP exits because `@modelcontextprotocol/sdk` is missing.
+4. (Optional) If installing from local source or developing:
    ```bash
    git clone https://github.com/wei292224644/agent-plugin-agent.git
    cd agent-plugin-agent
@@ -323,6 +324,7 @@ Only agents with `"installed": true` can be targeted for delegation.
 
 Once installed, your Host Agent automatically registers:
 
+- [skills/setup/SKILL.md](skills/setup/SKILL.md): `/baton:setup`, install npm dependencies into the plugin directory
 - [skills/baton-rescue/SKILL.md](skills/baton-rescue/SKILL.md): one-shot rescue + wait
 - [skills/baton-orchestrate/SKILL.md](skills/baton-orchestrate/SKILL.md): optional orchestration — background agent holds the graph, per-job review, async host notes, rework / fail-over, summarize (not tied to Speckit / OpenSpec / agent-skills)
 

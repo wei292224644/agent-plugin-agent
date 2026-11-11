@@ -162,7 +162,7 @@ Steps:
 - User named a target → honor it
 - Otherwise implementation/debug defaults to `codex`; if the host is already Codex → `claude`
 - Research / long context may use `gemini` / `agy`; local edits may use `cursor`
-- `not_installed` / `not_authenticated` → try the next vendor; do not stick
+- `not_installed` / `not_authenticated` / `quota_exceeded` → try the next vendor; do not stick
 
 ## Versus baton-rescue
 

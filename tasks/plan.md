@@ -1,36 +1,36 @@
-# Plan: result-markers
+# Implementation Plan: failure-summary + plugin-setup
 
-规格：`docs/superpowers/specs/SPEC-result-markers.md`  
-Issue：#10  
-状态：待确认
+规格：`docs/superpowers/specs/2026-11-11-failure-summary-design.md`、`docs/superpowers/specs/2026-11-11-baton-setup-design.md`  
+版本：`0.2.5`  
+状态：已完成
 
-## Approach
+## Overview
 
-把注入给下游的输出契约从 `APA_*` 换成 `BATON_*`；`interpret` 同时认新旧两套；测试主路径用新标记，留一条旧标记兼容；README 中英各加一句改名说明。不改 package / marketplace 名。
+两模块互不依赖。先改失败摘要，再加 `/baton:setup`。最后把插件版本升到 `0.2.5`，宿主才能拉到新 skill。
 
-## Components
+## Architecture Decisions
 
-| 组件 | 动作 |
-|---|---|
-| `src/runner.mjs` `OUTPUT_CONTRACT` | 只教 `BATON_DECISION` / `BATON_RESULT` / `BATON_END` |
-| `src/runner.mjs` `interpret` | 正则同时匹配 `APA_` 与 `BATON_` 前缀 |
-| `test/baton.test.mjs` | 主夹具改新标记；`interpret` 测新旧 |
-| `README.md` / `README.zh-CN.md` | 一句 apa→baton 改名说明 |
+- 摘要和 `quota_exceeded` 只放在 `describe()`。不改 Codex `messageFrom`。
+- setup 用 `scripts/setup.mjs`，不走 `src/cli.mjs`。后者顶层 import MCP SDK，依赖没装时进不了子命令。
+- 安装目录由脚本自己的路径决定，且 `package.json` name 必须是 `baton`。
 
-## Order
+## Dependency graph
 
-1. 先改 `interpret` + 失败测试（新旧都能解析）
-2. 改 `OUTPUT_CONTRACT`，更新委派夹具里的标记
-3. README 一句说明
-4. `npm test`；关 #10
+```
+failure-summary (runner + skills)
+plugin-setup (script + skill + README)    互不依赖
+        \                    /
+         version 0.2.5
+```
 
 ## Risks
 
 | 风险 | 缓解 |
 |---|---|
-| 已在跑的下游仍打 `APA_*` | 解析兼认旧前缀 |
-| 文档/设计稿里还有 APA 示例 | 本 module 只改用户可见 README + 运行时契约；历史设计稿不动，除非阻塞测试 |
+| 成功输出里出现 rate limit 被误判成额度 | 只在 `exitCode !== 0` 时判额度，且排在登录失败之后 |
+| setup 装到用户项目 | 脚本拒绝 name 不是 baton 的目录；skill 写明找不到根就停 |
+| `src/cli.mjs` 在缺依赖时不能当 setup 入口 | 独立脚本，测试断言源码不引用 SDK |
 
 ## Checkpoint
 
-`npm test` 全绿；契约文案无 `APA_`；`interpret` 新旧皆过；再关 issue。
+`npm test` 全绿；`node scripts/setup.mjs --json` 在本仓库为 `ready: true`。

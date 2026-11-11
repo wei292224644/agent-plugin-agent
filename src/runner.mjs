@@ -74,6 +74,55 @@ function tailText(text) {
   return value.length <= OUTPUT_TAIL ? value : value.slice(-OUTPUT_TAIL);
 }
 
+const QUOTA_PHRASES = ["usage limit", "quota exceeded", "rate limit"];
+
+function withoutHtml(text) {
+  return String(text || "")
+    .replace(/<!doctype[\s\S]*?(?:<\/html>|$)/gi, "")
+    .replace(/<html[\s\S]*?(?:<\/html>|$)/gi, "")
+    .trim();
+}
+
+function terminalReason(text) {
+  let found = "";
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!/turn\.failed/i.test(trimmed)) continue;
+    try {
+      const obj = JSON.parse(trimmed);
+      const msg = obj?.error?.message || obj?.message;
+      if (typeof msg === "string" && msg.trim()) {
+        found = msg.trim();
+        continue;
+      }
+    } catch {
+      // Plain log line, not a JSON event.
+    }
+    found = trimmed;
+  }
+  return found;
+}
+
+function isQuotaFailure(text) {
+  const hay = String(text || "").toLowerCase();
+  return QUOTA_PHRASES.some((phrase) => hay.includes(phrase));
+}
+
+function quotaSentence(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (isQuotaFailure(lines[i])) return lines[i].trim();
+  }
+  return "";
+}
+
+function failureSummary(stdout, stderr) {
+  const combined = `${stdout || ""}\n${stderr || ""}`;
+  const reason = terminalReason(combined);
+  if (reason) return tailText(reason);
+  return tailText(withoutHtml(stderr) || withoutHtml(stdout));
+}
+
 class Capture {
   constructor() {
     this.head = "";
@@ -346,8 +395,13 @@ function describe(record, ran) {
       next: nextForTimeout(sessionId),
     });
   }
-  if (ran.exitCode !== 0 && record.adapter.isAuthFailure(`${ran.stderr}\n${ran.stdout}`)) {
+  const raw = `${ran.stderr}\n${ran.stdout}`;
+  if (ran.exitCode !== 0 && record.adapter.isAuthFailure(raw)) {
     return pack({ ...base, status: "not_authenticated", summary: tailText(ran.stderr || output) });
+  }
+  if (ran.exitCode !== 0 && isQuotaFailure(raw)) {
+    const reason = terminalReason(raw) || quotaSentence(raw);
+    return pack({ ...base, status: "quota_exceeded", summary: tailText(reason) });
   }
   if (marker?.kind === "decision") {
     return pack({
@@ -363,7 +417,7 @@ function describe(record, ran) {
     const summary = marker?.kind === "result" ? marker.summary : message || output;
     return pack({ ...base, status: "success", summary: tailText(summary) });
   }
-  return pack({ ...base, status: "failed", summary: tailText(ran.stderr || message || output) });
+  return pack({ ...base, status: "failed", summary: failureSummary(ran.stdout, ran.stderr) });
 }
 
 function runningView(record) {
