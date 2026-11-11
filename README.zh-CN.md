@@ -77,7 +77,8 @@
 
 1. **Node.js** >= 18
 2. 本地已安装并登录至少一个受支持的 Agent CLI（如 `codex`、`claude`、`agy`、`cursor`、`gemini`）。
-3. （可选）如果你打算以源码方式本地安装或二次开发，先克隆本仓库并安装依赖：
+3. 通过插件市场安装后，在宿主会话运行 `/baton:setup`。市场安装不会执行 `npm install`，不跑这一步时 MCP 会因找不到 `@modelcontextprotocol/sdk` 起不来。
+4. （可选）如果你打算以源码方式本地安装或二次开发，先克隆本仓库并安装依赖：
    ```bash
    git clone https://github.com/wei292224644/agent-plugin-agent.git
    cd agent-plugin-agent
@@ -323,6 +324,7 @@ node src/cli.mjs agents
 
 安装插件后，宿主 Agent 会自动加载技能：
 
+- [skills/setup/SKILL.md](skills/setup/SKILL.md)：`/baton:setup`，给插件目录装上 npm 依赖
 - [skills/baton-rescue/SKILL.md](skills/baton-rescue/SKILL.md)：单跳下放 + 守候
 - [skills/baton-orchestrate/SKILL.md](skills/baton-orchestrate/SKILL.md)：可选调度——后台编排 agent 持依赖图、逐单审查、异步通知主会话、返工/换家、汇总（不绑定 Speckit / OpenSpec / agent-skills）
 

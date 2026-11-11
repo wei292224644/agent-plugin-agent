@@ -54,7 +54,7 @@ Say which target you picked before you call.
 - Watcher returns `success`: tell the user `summary` and `git_changes`. Do not redo those edits in the current session.
 - Watcher returns `needs_decision`: ask the user the `question` and `options` unchanged. Wait for the answer. Call `delegate_task` again with the same `session_id`; `prompt` is only the user's choice. If that returns `running`, open another watcher. Do not choose for the user, and do not start an unrelated new job.
 - Watcher returns `timed_out`: relay `summary` and `next`. If `session_id` is present, the user can continue with another `delegate_task` using that `session_id` and a larger `timeout_seconds`. Do not finish the work in the current session.
-- Watcher returns `failed`, `not_authenticated`, or `cancelled`: relay `summary`, then stop. Do not finish the work in the current session.
+- Watcher returns `failed`, `not_authenticated`, `quota_exceeded`, or `cancelled`: relay `summary`, then stop. Do not finish the work in the current session. On `quota_exceeded`, do not switch vendor.
 - User wants to stop: the main session calls `task_cancel` with that `task_id` and reports the result. Do not wait for the watcher first.
 - Host has no background sub-agent: the main session calls `task_wait` itself until the job ends. Do not poll `task_status`, and do not hang a shell.
 - `task_status` is for a peek only. Do not use it to wait for completion.
