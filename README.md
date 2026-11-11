@@ -324,7 +324,7 @@ Only agents with `"installed": true` can be targeted for delegation.
 Once installed, your Host Agent automatically registers:
 
 - [skills/baton-rescue/SKILL.md](skills/baton-rescue/SKILL.md): one-shot rescue + wait
-- [skills/baton-orchestrate/SKILL.md](skills/baton-orchestrate/SKILL.md): optional orchestration — pick CLIs, split, re-dispatch, summarize (not tied to Speckit / OpenSpec / agent-skills)
+- [skills/baton-orchestrate/SKILL.md](skills/baton-orchestrate/SKILL.md): optional orchestration — background agent holds the graph, per-job review, async host notes, rework / fail-over, summarize (not tied to Speckit / OpenSpec / agent-skills)
 
 Whenever a complex refactor, debugging task, or second opinion is needed, or whenever you say:
 > "Rescue this refactoring task to Codex"  
@@ -332,7 +332,7 @@ Whenever a complex refactor, debugging task, or second opinion is needed, or whe
 
 Your Host Agent invokes `delegate_task`. That call returns after the worker process is alive, not after the task is finished. The main session then starts a background sub-agent whose only job is `task_wait`. The host wakes the main session when that sub-agent finishes.
 
-For multi-CLI distribution, use `baton-orchestrate`: the host opens an orchestrator sub-agent that calls baton MCP. Baton is the transport; process/methodology stays with the workspace.
+For multi-CLI distribution, use `baton-orchestrate`: the host opens an orchestrator sub-agent that holds the plan, advances per job (wait → project review → dispatch dependents), notifies the main session asynchronously, and calls baton MCP. Baton is the transport; process/methodology stays with the workspace.
 
 **Default Routing Rules**:
 - Named target (e.g., "give this to Codex"): Dispatches to requested agent.
