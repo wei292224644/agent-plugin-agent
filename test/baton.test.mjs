@@ -666,6 +666,14 @@ test("baton skills ship with orchestrate and rescue frontmatter", () => {
   assert.match(rescue, /timeout_seconds/);
   assert.match(orchestrate, /timeout_seconds/);
   assert.match(orchestrate, /effective_timeout_seconds/);
+  assert.match(orchestrate, /dependency graph/i);
+  assert.match(orchestrate, /## Async notify host/);
+  assert.match(orchestrate, /worktree/i);
+  assert.match(orchestrate, /concurrent task_wait/i);
+  assert.match(orchestrate, /Stop and ask the host/i);
+  assert.match(orchestrate, /## Review \(project-owned\)/);
+  assert.match(orchestrate, /rework/i);
+  assert.match(orchestrate, /needs_decision/);
   assert.doesNotMatch(rescue, /[\u4e00-\u9fff]/);
   assert.doesNotMatch(orchestrate, /[\u4e00-\u9fff]/);
 });

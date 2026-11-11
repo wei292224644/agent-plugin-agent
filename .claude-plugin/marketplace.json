@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Baton：当前 CLI 做宿主，另一家本地 CLI 做执行。",
-    "version": "0.2.3"
+    "version": "0.2.4"
   },
   "plugins": [
     {
       "name": "baton",
       "description": "把一块有边界的工作下放到另一家本地 Agent CLI，需要决定时用同一会话继续。",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "source": "./"
     }
   ]

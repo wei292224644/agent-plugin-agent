@@ -1,7 +1,7 @@
 # Baton 调度代理（轻编排）
 
 日期：2026-11-10  
-状态：MVP 已落地 skill（worktree / 写入锁延后）
+状态：skill 已按 #22 升级为「编排 agent 持状态 + 逐单审查 + 异步通知」；worktree 引擎 / 写入锁仍延后（skill 里只给隔离建议）
 
 ## Problem Statement
 
@@ -13,7 +13,7 @@ How Might We：本机主控只下目标，由一层调度代理选 CLI、拆派�
 
 - **运输层（Baton）**：任意宿主 ↔ 本机各家 CLI；`delegate_task` / `task_wait` / `task_cancel`。不认「你是不是在跑 SDD / Speckit / OpenSpec」。
 - **方法层**：来自工作区已有材料（`.agents/`、OpenSpec、Speckit、自研规约，或什么都没有）。有则塞进信封；没有就空手派工。
-- **调度代理**：宿主自己的后台子 Agent，角色 = orchestrator：`list_agents` → 拆任务 → 多次 `delegate_task` → 守候/`task_wait` → 汇总。工人仍是各家 CLI。
+- **调度代理**：宿主自己的后台子 Agent，角色 = orchestrator：持依赖图与 session → `list_agents` → 拆任务 → `delegate_task` → 并发 `task_wait` → 逐单审查（项目规则）→ 返工/派下游 → 异步通知主会话 → 汇总。工人仍是各家 CLI。
 - **不学 dsh 的域模型**：不要 Trigger / Eval / Ticket / Mandate / 面板；只学 orchestrator vs worker 的角色分工。
 
 一句话：**Baton = 多 CLI 的总线；流程 = 乘客自带的行李。** 总线管安全与生命周期，不管航线图。
@@ -47,7 +47,7 @@ How Might We：本机主控只下目标，由一层调度代理选 CLI、拆派�
 - 调度代理模型：跟主控同模型
 - 再派第二家：默认失败换家，不无故双跑
 - 最大并发：默认 3；要更多问主控
-- worktree 隔离：延后
+- worktree 隔离：引擎延后；skill 建议默认独立 worktree，无隔离时主会话勿改共享树
 
 ## 和现状的关系
 
@@ -55,6 +55,6 @@ How Might We：本机主控只下目标，由一层调度代理选 CLI、拆派�
 |---|---|
 | `baton-rescue` | 单跳派工 + 守候 |
 | `task_wait` | 宿主子 Agent 守一单 |
-| `skills/baton-orchestrate/` | 多跳调度：选家、拆派、再派、汇总 |
+| `skills/baton-orchestrate/` | 多跳调度：持状态、选家、拆派、逐单审查、异步通知、返工/换家、汇总 |
 
 单调感来自「只有一跳派工」，用编排 skill 加厚用法；不必先加 Engine。
