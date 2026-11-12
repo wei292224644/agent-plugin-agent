@@ -620,6 +620,64 @@ export async function taskWait(input = {}) {
   }
 }
 
+export async function taskWaitAny(input = {}) {
+  const cwd = resolveCwd(input);
+  const taskIds = Array.isArray(input.taskIds)
+    ? input.taskIds.filter(Boolean)
+    : input.taskId
+      ? [input.taskId]
+      : [];
+  if (!taskIds.length) {
+    return { status: "failed", task_id: null, summary: "缺少 task_ids。" };
+  }
+
+  const liveRecords = [];
+  for (const id of taskIds) {
+    const record = tasks.get(id);
+    if (record) {
+      if (record.final) return record.final;
+      liveRecords.push(record);
+    } else {
+      const stored = readStatusFile(cwd, id);
+      if (stored && stored.view?.status !== "running") return stored.view;
+      return {
+        status: "failed",
+        task_id: id,
+        summary: stored ? "这一单不在当前进程里，没法守着。" : "没有这一单派工。",
+      };
+    }
+  }
+
+  const onProgress = input.onProgress;
+  let stopped = false;
+  const beat = () => {
+    if (stopped) return;
+    const running = liveRecords.filter((r) => !r.final);
+    if (stopped || !running.length) return;
+    const views = running.map((r) => viewOf(r));
+    const lines = views.map((v) => progressLine(v)).filter(Boolean);
+    const summary = `正在等待 ${running.length} 单派工（${running.map((r) => r.taskId).join(", ")}）。`;
+    const composite = {
+      status: "running",
+      summary,
+      output: lines.join(" | ") || summary,
+    };
+    try {
+      Promise.resolve(onProgress?.(composite)).catch(() => {});
+    } catch {
+      // Progress is a hint. A throw must not end the wait.
+    }
+  };
+  const timer = onProgress ? setInterval(beat, input.intervalMs ?? WAIT_PROGRESS_MS) : null;
+  if (onProgress) beat();
+  try {
+    return await Promise.race(liveRecords.map((r) => r.settled));
+  } finally {
+    stopped = true;
+    if (timer) clearInterval(timer);
+  }
+}
+
 export function taskStatus(input = {}) {
   const cwd = resolveCwd(input);
   if (input.taskId) {

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -14,6 +14,7 @@ import {
   taskCancel,
   taskStatus,
   taskWait,
+  taskWaitAny,
 } from "../src/runner.mjs";
 import { gitChanges, gitSnapshot } from "../src/git.mjs";
 
@@ -534,6 +535,126 @@ test("taskWait fails closed when the task cannot be waited on", async () => {
   }
 });
 
+test("taskWaitAny fails closed when taskIds is missing, empty, or invalid", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-wait-any-"));
+  assert.equal((await taskWaitAny({ cwd })).summary, "缺少 task_ids。");
+  assert.equal((await taskWaitAny({ taskIds: [], cwd })).summary, "缺少 task_ids。");
+  assert.equal((await taskWaitAny({ taskIds: ["missing-task"], cwd })).summary, "没有这一单派工。");
+
+  const doneId = "11111111-1111-1111-1111-111111111111";
+  const runningId = "22222222-2222-2222-2222-222222222222";
+  const doneFile = statusPath(cwd, doneId);
+  const runningFile = statusPath(cwd, runningId);
+  writeFileSync(doneFile, JSON.stringify({ status: "success", task_id: doneId, summary: "落盘完成" }));
+  writeFileSync(runningFile, JSON.stringify({ status: "running", task_id: runningId, summary: "子 Agent 已启动。" }));
+  try {
+    assert.equal((await taskWaitAny({ taskIds: [doneId], cwd })).summary, "落盘完成");
+    assert.equal((await taskWaitAny({ taskIds: [runningId], cwd })).summary, "这一单不在当前进程里，没法守着。");
+  } finally {
+    rmSync(doneFile, { force: true });
+    rmSync(runningFile, { force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("taskWaitAny returns whichever finishes first without killing or blocking others", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-wait-any-"));
+  const dir = binDir("claude");
+  let proc1;
+  let proc2;
+  const t1 = await delegate(
+    { target: "claude", prompt: "任务一", cwd, env: { ...process.env, PATH: dir } },
+    {
+      spawnImpl: () => {
+        proc1 = child();
+        return proc1;
+      },
+    },
+  );
+  const t2 = await delegate(
+    { target: "claude", prompt: "任务二", cwd, env: { ...process.env, PATH: dir } },
+    {
+      spawnImpl: () => {
+        proc2 = child();
+        return proc2;
+      },
+    },
+  );
+
+  const seen = [];
+  const waitingFirst = waitTimeout(taskWaitAny({
+    taskIds: [t1.task_id, t2.task_id],
+    cwd,
+    intervalMs: 10,
+    onProgress(view) {
+      seen.push(view.status);
+      throw new Error("progress drop test");
+    },
+  }));
+
+  await new Promise((resolve) => setTimeout(resolve, 35));
+  proc2.stdout.emit("data", "{\"result\":\"BATON_RESULT\\nsummary: 任务二先好了\\nBATON_END\"}");
+  proc2.emit("close", 0);
+
+  const firstResult = await waitingFirst;
+  assert.equal(firstResult.status, "success");
+  assert.equal(firstResult.task_id, t2.task_id);
+  assert.equal(firstResult.summary, "任务二先好了");
+  assert.ok(seen.length >= 2);
+  assert.ok(seen.every((s) => s === "running"));
+
+  const t1Status = taskStatus({ taskId: t1.task_id, cwd });
+  assert.equal(t1Status.status, "running");
+
+  const waitingSecond = waitTimeout(taskWaitAny({
+    taskIds: [t1.task_id],
+    cwd,
+  }));
+  proc1.stdout.emit("data", "{\"result\":\"BATON_RESULT\\nsummary: 任务一随后好了\\nBATON_END\"}");
+  proc1.emit("close", 0);
+
+  const secondResult = await waitingSecond;
+  assert.equal(secondResult.status, "success");
+  assert.equal(secondResult.task_id, t1.task_id);
+  assert.equal(secondResult.summary, "任务一随后好了");
+
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test("taskWaitAny returns already finished task and handles cancellation", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-wait-any-"));
+  const dir = binDir("claude");
+  const t1 = await delegate(
+    { target: "claude", prompt: "快速任务", cwd, env: { ...process.env, PATH: dir } },
+    { spawnImpl: spawnOk({ result: "BATON_RESULT\nsummary: 秒杀\nBATON_END" }) },
+  );
+  let proc2;
+  const t2 = await delegate(
+    { target: "claude", prompt: "待取消任务", cwd, env: { ...process.env, PATH: dir } },
+    {
+      spawnImpl: () => {
+        proc2 = child();
+        return proc2;
+      },
+    },
+  );
+
+  const instant = await waitTimeout(taskWaitAny({ taskIds: [t1.task_id, t2.task_id], cwd }));
+  assert.equal(instant.status, "success");
+  assert.equal(instant.task_id, t1.task_id);
+  assert.equal(instant.summary, "秒杀");
+
+  const waitingCancel = waitTimeout(taskWaitAny({ taskIds: [t2.task_id], cwd }));
+  assert.equal(taskCancel({ taskId: t2.task_id, cwd }).status, "cancelled");
+  const cancelResult = await waitingCancel;
+  assert.equal(cancelResult.status, "cancelled");
+  assert.equal(cancelResult.task_id, t2.task_id);
+
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(cwd, { recursive: true, force: true });
+});
+
 test("progressNotification is empty without a progress token", () => {
   const view = { output: "第一行\n正在写测试\n", summary: "子 Agent 已启动。" };
   assert.equal(progressNotification({}, 1, view), null);
@@ -574,6 +695,48 @@ test("gitChanges detects content edits to files that stay untracked", () => {
   assert.equal(changes.files_changed, 1);
   assert.ok(changes.insertions >= 2);
   assert.match(changes.diff_stat, /u\.txt \| untracked/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test("gitChanges detects dirty tracked edits and changes in nested untracked dirs (issue #30)", () => {
+  const cwd = mkdtempSync(path.join(import.meta.dirname, "tmp-"));
+  const git = (args) => execFileSync("git", args, { cwd, encoding: "utf8" });
+  git(["init"]);
+  writeFileSync(path.join(cwd, "README.md"), "# Init\n");
+  git(["add", "README.md"]);
+  git(["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-m", "init"]);
+
+  // 1. Pre-dirty a tracked file
+  writeFileSync(path.join(cwd, "README.md"), "# Init\npre-edit line\n");
+
+  // 2. Create nested untracked dir with files
+  mkdirSync(path.join(cwd, "services/sandbox-gateway/nginx"), { recursive: true });
+  writeFileSync(path.join(cwd, "services/sandbox-gateway/docker-compose.yml"), "version: 3\n");
+  writeFileSync(path.join(cwd, "services/sandbox-gateway/nginx/conf.txt"), "server {}\n");
+
+  const before = gitSnapshot(cwd);
+
+  // 3. Worker modifies dirty tracked file again
+  writeFileSync(path.join(cwd, "README.md"), "# Init\npre-edit line\nworker line\n");
+
+  // 4. Worker adds a new file in untracked dir
+  mkdirSync(path.join(cwd, "services/sandbox-gateway/frpc"), { recursive: true });
+  writeFileSync(path.join(cwd, "services/sandbox-gateway/frpc/frpc.toml"), "server_addr = 127.0.0.1\n");
+
+  // 5. Worker renames conf.txt to template.txt (delete old, add new)
+  unlinkSync(path.join(cwd, "services/sandbox-gateway/nginx/conf.txt"));
+  writeFileSync(path.join(cwd, "services/sandbox-gateway/nginx/template.txt"), "server template {}\n");
+
+  const after = gitSnapshot(cwd);
+  const changes = gitChanges(cwd, before, after);
+
+  // docker-compose.yml unchanged, so 4 files changed:
+  // README.md, frpc.toml, conf.txt (deleted), template.txt (added)
+  assert.equal(changes.files_changed, 4);
+  assert.match(changes.diff_stat, /README\.md/);
+  assert.match(changes.diff_stat, /services\/sandbox-gateway\/frpc\/frpc\.toml \| untracked \+1/);
+  assert.match(changes.diff_stat, /services\/sandbox-gateway\/nginx\/template\.txt \| untracked \+1/);
+  assert.match(changes.diff_stat, /services\/sandbox-gateway\/nginx\/conf\.txt \| untracked deleted/);
   rmSync(cwd, { recursive: true, force: true });
 });
 
@@ -668,7 +831,9 @@ test("baton skills ship with orchestrate and rescue frontmatter", () => {
   assert.match(orchestrate, /effective_timeout_seconds/);
   assert.match(orchestrate, /dependency graph/i);
   assert.match(orchestrate, /## Async notify host/);
+  assert.match(orchestrate, /SendMessage\(to:\s*"main"/);
   assert.match(orchestrate, /worktree/i);
+  assert.match(orchestrate, /task_wait_any/);
   assert.match(orchestrate, /concurrent task_wait/i);
   assert.match(orchestrate, /Stop and ask the host/i);
   assert.match(orchestrate, /## Review \(project-owned\)/);

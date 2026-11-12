@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { delegate, listAgents, progressNotification, taskCancel, taskStatus, taskWait } from "./runner.mjs";
+import { delegate, listAgents, progressNotification, taskCancel, taskStatus, taskWait, taskWaitAny } from "./runner.mjs";
 
 const targets = ["codex", "claude", "gemini", "agy", "cursor"];
 
@@ -85,6 +85,30 @@ export async function startMcp() {
           return extra.sendNotification(note);
         },
       }));
+    },
+  );
+  server.registerTool(
+    "task_wait_any",
+    {
+      description:
+        "守着一组派工中的任意一单，哪单先到终态就先返回哪单的最终结果（带 task_id）。供编排 Agent 逐单推进审查与通知，避免同一轮多个 task_wait 导致的整批等待（join）阻塞。",
+      inputSchema: z.object({
+        task_ids: z.array(z.string()).min(1).describe("要监听的 task_id 列表。"),
+      }),
+    },
+    async (args, extra) => {
+      let step = 0;
+      return text(
+        await taskWaitAny({
+          taskIds: args.task_ids,
+          onProgress: (view) => {
+            step += 1;
+            const note = progressNotification(extra, step, view);
+            if (!note || !extra?.sendNotification) return undefined;
+            return extra.sendNotification(note);
+          },
+        }),
+      );
     },
   );
   const transport = new StdioServerTransport();

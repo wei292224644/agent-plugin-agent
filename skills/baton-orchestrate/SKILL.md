@@ -24,8 +24,8 @@ Baton is the transport layer. It does **not** bind any engineering methodology. 
 | Role | Who | Does |
 |---|---|---|
 | Host | Current session | Start the orchestrator; relay stop / user answers; receive async per-job notes and the final summary |
-| Orchestrator | Host background sub-agent | Hold state; `list_agents`; split; `delegate_task`; `task_wait`; review; rework; dispatch dependents; notify host; summarize |
-| Watcher (fallback only) | Same sub-agent by default | Prefer concurrent `task_wait` in one turn on the orchestrator. Spawn a wait-only sub-agent per job only if the host cannot issue multiple tool calls in one turn |
+| Orchestrator | Host background sub-agent | Hold state; `list_agents`; split; `delegate_task`; `task_wait_any` / `task_wait`; review; rework; dispatch dependents; notify host; summarize |
+| Watcher (fallback only) | Same sub-agent by default | The orchestrator waits with `task_wait_any`. Spawn a wait-only sub-agent per job only if the host has no background agent or cannot wait |
 | Reviewer (optional) | Orchestrator, or one sub-agent per finished job | Run project-defined checks; return a short pass/fail + notes. Orchestrator keeps only the conclusion when batches are large |
 | Worker | `codex` / `claude` / `gemini` / `agy` / `cursor` | Edit code; must not call baton again |
 
@@ -47,7 +47,7 @@ Do not use (prefer `baton-rescue` or stay in the host):
 
 ## Two shapes
 
-**Independent jobs** (no edges, only a final summary needed): still use the background orchestrator. Dispatch path-disjoint jobs in parallel, fire concurrent `task_wait`s in the **same** tool-call turn (never serialize waits for jobs that are already running), async-notify the host after each job conclusion, then summarize. Skip per-job review unless the project defines one.
+**Independent jobs** (no edges, only a final summary needed): still use the background orchestrator. Dispatch path-disjoint jobs in parallel, wait with `task_wait_any(task_ids: [...])` to advance each job as it finishes (never serialize `task_wait` or issue multiple `task_wait`s in one turn), async-notify the host after each job conclusion, then summarize. Skip per-job review unless the project defines one.
 
 **Dependency graph** (or project requires review between hops): default shape below. Advance **per job**, not per whole batch.
 
@@ -56,8 +56,8 @@ Host  ◄── async note per finished job (do not wait for a reply) ──┐
   │                                                               │
   └── reply only when a decision is required ──► Orchestrator
         (holds graph, session_ids, results, rework counts)
-                    │  task_wait → review → pass: dispatch ready dependents
-                    │                    → fail: same session_id rework (cap)
+                    │  task_wait_any → review → pass: dispatch ready dependents
+                    │                         → fail: same session_id rework (cap)
                     ▼
               CLI workers (already running in parallel after delegate_task)
 ```
@@ -65,7 +65,7 @@ Host  ◄── async note per finished job (do not wait for a reply) ──┐
 ## Per-job loop (dependency / review shape)
 
 1. Dispatch every job whose dependencies are satisfied and whose paths do not overlap other live jobs (respect max concurrency).
-2. For every live `task_id`, start a wait. Independent waits must be issued in the **same** message/turn so a finished job is not stuck behind another `task_wait`.
+2. Collect all live `task_id`s and call `task_wait_any(task_ids: live_task_ids)`. Do not issue concurrent `task_wait` calls in the same turn (host parallel tool calls join instead of race, which blocks the whole batch).
 3. When a job ends:
    - **`needs_decision`:** stop the graph; ask the host (who asks the user); resume with the same `session_id` after the answer. Do not choose for the user.
    - Run the project-defined review if any (see Review). No project review → treat a clean terminal `success` as pass.
@@ -78,7 +78,9 @@ Host  ◄── async note per finished job (do not wait for a reply) ──┐
 
 After each job reaches a conclusion (pass, fail-at-cap, cancelled), push a short note to the main session **without waiting for a reply**.
 
-- Prefer the host's native main-session message channel when present (for example Cursor `SendMessage` to the main agent).
+- Prefer the host's native main-session message channel when present:
+  - **Claude Code**: `SendMessage(to: "main", message: ...)`
+  - **Cursor**: `SendMessage(to: "main", ...)`
 - If no such channel exists, keep notes for the final summary and any host-visible progress the platform already provides; do not block the graph on host acknowledgement.
 
 Each note should include: job id, conclusion, changed files, check results, leftover risks.
@@ -131,7 +133,7 @@ Goal:
 
 Rules:
 - Hold: dependency graph, session_id per job, results, rework counts
-- Use baton MCP for dispatch/wait/cancel: list_agents, delegate_task, task_wait, task_cancel
+- Use baton MCP for dispatch/wait/cancel: list_agents, delegate_task, task_wait, task_wait_any, task_cancel
 - Do not implement worker coding tasks yourself
 - Do not open a shell to poll baton; open a shell only for (1) project-defined review/check commands when those rules exist, and (2) optional `git worktree` / branch setup for isolation
 - Do not require Speckit / OpenSpec / agent-skills; if the workspace has rules, copy them into worker prompts and follow them for review; otherwise omit and skip review
@@ -140,7 +142,7 @@ Rules:
 - timeout_seconds defaults to 300 and caps at 1800. Long subtasks must pass timeout_seconds explicitly; check effective_timeout_seconds
 - Prefer an isolated git worktree; if you cannot, tell the host the shared tree must stay untouched
 - Path-disjoint ready jobs may run in parallel; overlapping paths stay serialized
-- Issue concurrent task_wait calls in the same turn for every job already running — never wait A then B when both are live
+- Advance per job using task_wait_any with all currently live task_ids — never wait A then B sequentially, and never issue concurrent task_wait calls in one turn (parallel tool calls join instead of race)
 - Advance per job: wait → review (if defined) → pass: notify host async and dispatch newly ready dependents; fail: same session_id rework up to cap (default 1)
 - On timed_out: follow next; prefer same session_id + larger timeout_seconds before switching vendor
 - On failed with no useful session: switch vendor once; do not dual-run the same edit without cause
@@ -153,7 +155,7 @@ Steps:
 2. Build the dependency graph of bounded subtasks (prompt + files + edges)
 3. Pick target_agent per job and say why in one sentence
 4. Dispatch all currently ready jobs (respect concurrency + path overlap); keep task_id and session_id
-5. Wait concurrently; on each completion run the per-job loop above
+5. Wait via task_wait_any(task_ids: live_task_ids); on each completion run the per-job loop above
 6. Summarize when every node is terminal
 ```
 

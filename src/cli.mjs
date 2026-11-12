@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { delegate, listAgents, taskCancel, taskStatus, taskWait } from "./runner.mjs";
+import { delegate, listAgents, taskCancel, taskStatus, taskWait, taskWaitAny } from "./runner.mjs";
 import { startMcp } from "./mcp.mjs";
 
 const usage = `用法:
   baton agents
   baton delegate --target <codex|claude|gemini|agy|cursor> [--prompt <text>] [--session <id>] [--timeout <seconds>] [--file <path>...]
   baton status [--task <id>]
-  baton wait --task <id>
+  baton wait --task <id> [--task <id>...]
   baton cancel [--task <id>]
   baton mcp
 
@@ -62,12 +62,14 @@ if (command === "mcp") {
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } else if (command === "wait") {
   const args = parseArgs(rest);
-  const taskId = args.task === true ? undefined : args.task;
-  if (!taskId) {
+  const tasks = asList(args.task);
+  if (!tasks.length) {
     process.stderr.write(usage);
     process.exit(2);
   }
-  const result = await taskWait({ taskId });
+  const result = tasks.length > 1
+    ? await taskWaitAny({ taskIds: tasks })
+    : await taskWait({ taskId: tasks[0] });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } else if (command === "status" || command === "cancel") {
   const args = parseArgs(rest);
