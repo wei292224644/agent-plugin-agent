@@ -8,8 +8,11 @@ export const cursor = {
     // cursor-agent 名字不会撞上 IDE 的 `cursor`，也比 PATH 里别的 `agent` 先命中。
     return which(["cursor-agent", "agent"], env);
   },
-  build({ bin, cwd, prompt, sessionId }) {
+  build({ bin, cwd, prompt, sessionId, reasoningEffort }) {
     const args = ["--print", "--force", "--trust", "--output-format", "json", "--workspace", cwd];
+    if (reasoningEffort) {
+      args.push("--model", `auto[effort=${reasoningEffort}]`);
+    }
     if (sessionId) args.push("--resume", sessionId);
     args.push(prompt);
     return { command: bin, args, stdin: null };

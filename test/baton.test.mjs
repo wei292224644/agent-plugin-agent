@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -349,6 +349,123 @@ test("gemini and agy put the prompt and resume id in argv", async () => {
     assert.equal(argv.some((arg) => String(arg).includes("BATON_DECISION")), true);
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("reasoning_effort maps to native CLI flags or provides fallback warning", async () => {
+  // 1. codex fresh & resume
+  const codexDir = binDir("codex");
+  let codexArgv = [];
+  await delegate(
+    { target: "codex", prompt: "test", reasoningEffort: "low", cwd: codexDir, env: { ...process.env, PATH: codexDir } },
+    { spawnImpl: (bin, args) => { codexArgv = args; return spawnOk({ session_id: "s1", result: "BATON_RESULT\nok\nBATON_END" })(); } },
+  );
+  assert.ok(codexArgv.includes("-c"));
+  assert.ok(codexArgv.includes('model_reasoning_effort="low"'));
+
+  let codexResumeArgv = [];
+  await delegate(
+    { target: "codex", prompt: "test", sessionId: "thread-1", reasoningEffort: "high", cwd: codexDir, env: { ...process.env, PATH: codexDir } },
+    { spawnImpl: (bin, args) => { codexResumeArgv = args; return spawnOk({ session_id: "thread-1", result: "BATON_RESULT\nok\nBATON_END" })(); } },
+  );
+  assert.ok(codexResumeArgv.includes("-c"));
+  assert.ok(codexResumeArgv.includes('model_reasoning_effort="high"'));
+  rmSync(codexDir, { recursive: true, force: true });
+
+  // 2. claude
+  const claudeDir = binDir("claude");
+  let claudeArgv = [];
+  await delegate(
+    { target: "claude", prompt: "test", reasoningEffort: "ultra", cwd: claudeDir, env: { ...process.env, PATH: claudeDir } },
+    { spawnImpl: (bin, args) => { claudeArgv = args; return spawnOk({ session_id: "s1", result: "BATON_RESULT\nok\nBATON_END" })(); } },
+  );
+  assert.ok(claudeArgv.includes("--effort"));
+  assert.equal(claudeArgv[claudeArgv.indexOf("--effort") + 1], "max");
+  rmSync(claudeDir, { recursive: true, force: true });
+
+  // 3. agy
+  const agyDir = binDir("agy");
+  let agyArgv = [];
+  await delegate(
+    { target: "agy", prompt: "test", reasoningEffort: "medium", cwd: agyDir, env: { ...process.env, PATH: agyDir } },
+    { spawnImpl: (bin, args) => { agyArgv = args; return spawnOk({ conversation_id: "s1", response: "BATON_RESULT\nok\nBATON_END" })(); } },
+  );
+  assert.ok(agyArgv.includes("--effort"));
+  assert.equal(agyArgv[agyArgv.indexOf("--effort") + 1], "medium");
+  rmSync(agyDir, { recursive: true, force: true });
+
+  // 4. cursor
+  const cursorDir = binDir("cursor-agent");
+  let cursorArgv = [];
+  await delegate(
+    { target: "cursor", prompt: "test", reasoningEffort: "low", cwd: cursorDir, env: { ...process.env, PATH: cursorDir } },
+    { spawnImpl: (bin, args) => { cursorArgv = args; return spawnOk({ session_id: "s1", result: "BATON_RESULT\nok\nBATON_END" })(); } },
+  );
+  assert.ok(cursorArgv.includes("--model"));
+  assert.equal(cursorArgv[cursorArgv.indexOf("--model") + 1], "auto[effort=low]");
+  rmSync(cursorDir, { recursive: true, force: true });
+
+  // 5. gemini fallback warning
+  const geminiDir = binDir("gemini");
+  const geminiResult = await delegate(
+    { target: "gemini", prompt: "test", reasoningEffort: "high", cwd: geminiDir, env: { ...process.env, PATH: geminiDir } },
+    { spawnImpl: () => spawnOk({ session_id: "s1", response: "BATON_RESULT\nok\nBATON_END" })() },
+  );
+  assert.match(geminiResult.warning, /gemini 暂不支持按单指定 reasoning_effort/);
+  rmSync(geminiDir, { recursive: true, force: true });
+});
+
+test("task_status and progress reporting track log_path, phase, and events", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "baton-visibility-"));
+  const dir = binDir("codex");
+  let proc;
+  const started = await delegate(
+    { target: "codex", prompt: "跑任务", cwd, env: { ...process.env, PATH: dir } },
+    {
+      spawnImpl: () => {
+        proc = child();
+        return proc;
+      },
+    },
+  );
+  assert.equal(started.status, "running");
+  assert.ok(started.log_path);
+  assert.ok(existsSync(started.log_path));
+
+  // 1. Initially thinking
+  const initStatus = taskStatus({ taskId: started.task_id, cwd });
+  assert.equal(initStatus.phase, "thinking");
+
+  // 2. Command execution event
+  proc.stdout.emit("data", JSON.stringify({
+    type: "item.started",
+    item: { id: "1", type: "command_execution", command: "npm test" },
+  }) + "\n");
+
+  const cmdStatus = taskStatus({ taskId: started.task_id, cwd });
+  assert.equal(cmdStatus.phase, "executing_command");
+  assert.match(cmdStatus.last_action, /跑命令: npm test/);
+  assert.match(cmdStatus.summary, /正在跑命令：跑命令: npm test/);
+
+  // 3. Command completion event -> back to thinking
+  proc.stdout.emit("data", JSON.stringify({
+    type: "item.completed",
+    item: { id: "1", type: "command_execution", command: "npm test", exit_code: 0 },
+  }) + "\n");
+
+  const thinkStatus = taskStatus({ taskId: started.task_id, cwd });
+  assert.equal(thinkStatus.phase, "thinking");
+  assert.match(thinkStatus.last_action, /已完成命令: npm test \(exit 0\)/);
+  assert.match(thinkStatus.summary, /等模型思考中/);
+  assert.ok(thinkStatus.recent_events.length >= 2);
+
+  // Check log_path content contains the emitted chunks
+  const logContent = readFileSync(started.log_path, "utf8");
+  assert.ok(logContent.includes("npm test"));
+
+  taskCancel({ taskId: started.task_id, cwd });
+  rmSync(started.log_path, { force: true });
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(cwd, { recursive: true, force: true });
 });
 
 test("running and needs_decision returns tell the host what to do next", async () => {

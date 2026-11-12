@@ -7,8 +7,12 @@ export const agy = {
   resolve(env) {
     return which(["agy"], env);
   },
-  build({ bin, prompt, sessionId }) {
+  build({ bin, prompt, sessionId, reasoningEffort }) {
     const args = ["--print", prompt, "--mode", "accept-edits", "--output-format", "json"];
+    if (reasoningEffort) {
+      const level = reasoningEffort === "ultra" ? "max" : reasoningEffort;
+      args.push("--effort", level);
+    }
     if (sessionId) args.push("--conversation", sessionId);
     return { command: bin, args, stdin: null };
   },

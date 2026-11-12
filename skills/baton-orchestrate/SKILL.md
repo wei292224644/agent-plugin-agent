@@ -140,6 +140,7 @@ Rules:
 - Do not delegate to the CLI vendor this host session already is
 - Default max 3 jobs running at once; ask the host before going higher
 - timeout_seconds defaults to 300 and caps at 1800. Long subtasks must pass timeout_seconds explicitly; check effective_timeout_seconds
+- Pass reasoning_effort (`low`, `medium`, `high`, `ultra`) when appropriate; mechanical subtasks (templates, configs, migrations) should use `low` to avoid waiting on model overthinking
 - Prefer an isolated git worktree; if you cannot, tell the host the shared tree must stay untouched
 - Path-disjoint ready jobs may run in parallel; overlapping paths stay serialized
 - Advance per job using task_wait_any with all currently live task_ids — never wait A then B sequentially, and never issue concurrent task_wait calls in one turn (parallel tool calls join instead of race)
