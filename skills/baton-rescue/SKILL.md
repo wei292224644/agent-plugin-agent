@@ -42,6 +42,7 @@ Say which target you picked before you call.
 - `target_agent`: the vendor chosen above
 - `prompt`: a self-contained task. State done criteria and which files to look at
 - `files`: include paths when you know them
+- `reasoning_effort`: optional `low` | `medium` | `high` | `ultra`. Mechanical subtasks (deployment files, boilerplate edits) can pass `low` to avoid spending minutes waiting for model thinking. Supported natively on `codex`, `claude`, `agy`; parameterized on `cursor`; ignored on `gemini`
 - `timeout_seconds`: default 300, hard cap 1800. Long jobs (migration, real-env verify, multi-file rewrite) must set this explicitly; omitting it often causes `timed_out`. The return includes `effective_timeout_seconds` (what actually applied after clamping)
 - When this is a continuation of the same job, pass the same `session_id`
 - The same workspace may run several jobs at once. If one is already `running`, still call `delegate_task` for the next; do not wait for the first to finish. Whether those jobs would touch the same files is for the current session to decide
@@ -57,4 +58,4 @@ Say which target you picked before you call.
 - Watcher returns `failed`, `not_authenticated`, `quota_exceeded`, or `cancelled`: relay `summary`, then stop. Do not finish the work in the current session. On `quota_exceeded`, do not switch vendor.
 - User wants to stop: the main session calls `task_cancel` with that `task_id` and reports the result. Do not wait for the watcher first.
 - Host has no background sub-agent: the main session calls `task_wait` itself until the job ends. Do not poll `task_status`, and do not hang a shell.
-- `task_status` is for a peek only. Do not use it to wait for completion.
+- `task_status` is for a peek only: returns duration, current phase (`thinking` with elapsed seconds, `executing_command`), `last_action`, `recent_events`, `log_path`, and `git_changes` so far. Do not use it to wait for completion.

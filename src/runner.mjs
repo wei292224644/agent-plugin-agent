@@ -276,7 +276,7 @@ function snapshotTask(snapshot) {
   };
 }
 
-function startProcess(spec, timeoutMs, spawnImpl) {
+function startProcess(spec, timeoutMs, spawnImpl, onChunk) {
   const stdout = new Capture();
   const stderr = new Capture();
   let settled = false;
@@ -323,8 +323,18 @@ function startProcess(spec, timeoutMs, spawnImpl) {
       killChild(child);
       grace = setTimeout(finish, 1000);
     }, timeoutMs);
-    child.stdout?.on("data", (chunk) => stdout.push(chunk));
-    child.stderr?.on("data", (chunk) => stderr.push(chunk));
+    child.stdout?.on("data", (chunk) => {
+      stdout.push(chunk);
+      try {
+        onChunk?.("stdout", chunk);
+      } catch {}
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr.push(chunk);
+      try {
+        onChunk?.("stderr", chunk);
+      } catch {}
+    });
     child.on("error", (error) => {
       stderr.push(error.message);
       exitCode = 1;
@@ -364,6 +374,9 @@ function describe(record, ran) {
   const pack = (fields) => ({
     task_id: record.taskId,
     ...blank(record.target, record.started, record.sessionId),
+    reasoning_effort: record.reasoningEffort || undefined,
+    log_path: record.logPath || undefined,
+    warning: record.warning || undefined,
     ...fields,
   });
   let lastMessage = "";
@@ -420,6 +433,60 @@ function describe(record, ran) {
   return pack({ ...base, status: "failed", summary: failureSummary(ran.stdout, ran.stderr) });
 }
 
+function setRecordPhase(record, phase, action) {
+  if (action && action !== record.lastAction) {
+    record.lastAction = action;
+    const timeStr = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    record.recentEvents.push(`[${timeStr}] ${action}`);
+    if (record.recentEvents.length > 5) record.recentEvents.shift();
+  }
+  if (phase !== record.phase) {
+    record.phase = phase;
+    record.phaseStartedAt = Date.now();
+  }
+}
+
+function updateProgress(record, rawStdout) {
+  const text = String(rawStdout || "");
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const obj = JSON.parse(trimmed);
+      if (obj.type === "item.started") {
+        if (obj.item?.type === "command_execution") {
+          const cmd = String(obj.item.command || "").slice(0, 100);
+          setRecordPhase(record, "executing_command", `跑命令: ${cmd}`);
+        } else if (obj.item?.type === "file_change") {
+          setRecordPhase(record, "editing_file", "修改文件");
+        } else if (obj.item?.type === "agent_message") {
+          setRecordPhase(record, "generating_output", "生成回复中");
+        }
+      } else if (obj.type === "item.completed") {
+        if (obj.item?.type === "command_execution") {
+          const cmd = String(obj.item.command || "").slice(0, 80);
+          const exit = obj.item.exit_code ?? 0;
+          setRecordPhase(record, "thinking", `已完成命令: ${cmd} (exit ${exit})`);
+        } else if (obj.item?.type === "agent_message") {
+          setRecordPhase(record, "thinking", "模型思考中");
+        }
+      } else if (obj.type === "turn.started" || obj.type === "token_count") {
+        setRecordPhase(record, "thinking", record.lastAction);
+      }
+    } catch {
+      // Incomplete line
+    }
+  }
+
+  if (!record.lastAction) {
+    if (record.lastOutputAt && Date.now() - record.lastOutputAt <= 3000) {
+      setRecordPhase(record, "generating_output", null);
+    } else {
+      setRecordPhase(record, "thinking", null);
+    }
+  }
+}
+
 function runningView(record) {
   const snap = record.proc.output();
   const raw = snap.stdout || "";
@@ -438,14 +505,32 @@ function runningView(record) {
     record.lastOutputText = output;
     if (output) record.lastOutputAt = Date.now();
   }
+  updateProgress(record, raw);
   const sessionId = record.adapter.sessionIdFrom(raw) || null;
+  const phaseDurationSeconds = Math.max(0, Math.round((Date.now() - record.phaseStartedAt) / 1000));
+  let summary = output ? "子 Agent 输出中。" : "子 Agent 已启动。";
+  if (record.phase === "thinking" && (phaseDurationSeconds > 0 || record.lastAction)) {
+    summary = `等模型思考中（已持续 ${phaseDurationSeconds}s）${record.lastAction ? ` | 最近：${record.lastAction}` : ""}`;
+  } else if (record.phase === "executing_command") {
+    summary = `正在跑命令：${record.lastAction || ""}`;
+  } else if (record.lastAction) {
+    summary = `子 Agent 运行中（${record.target}） | 最近：${record.lastAction}`;
+  }
+
   return {
     task_id: record.taskId,
     ...blank(record.target, record.started, sessionId),
     status: "running",
+    phase: record.phase,
+    phase_duration_s: phaseDurationSeconds,
+    last_action: record.lastAction || undefined,
+    recent_events: record.recentEvents?.length ? [...record.recentEvents] : undefined,
+    log_path: record.logPath || undefined,
+    reasoning_effort: record.reasoningEffort || undefined,
+    warning: record.warning || undefined,
     output,
     last_output_at: record.lastOutputAt || null,
-    summary: output ? "子 Agent 输出中。" : "子 Agent 已启动。",
+    summary,
     git_changes: gitChanges(record.cwd, record.before, gitSnapshot(record.cwd)),
     effective_timeout_seconds: record.effectiveTimeoutSeconds,
   };
@@ -490,6 +575,8 @@ export async function delegate(input, deps = {}) {
     exit_code: null,
     output: "",
     session_id: input.sessionId || null,
+    reasoning_effort: input.reasoningEffort || undefined,
+    log_path: null,
     ...fields,
   });
 
@@ -511,16 +598,27 @@ export async function delegate(input, deps = {}) {
       cwd,
       prompt: buildPrompt(input.prompt, input.files),
       sessionId: input.sessionId || null,
+      reasoningEffort: input.reasoningEffort || null,
     });
   } catch (error) {
     return pack({ status: "failed", summary: error.message });
   }
+
+  const logPath = path.join(os.tmpdir(), `baton-${crypto.randomUUID()}.log`);
+  try {
+    fs.writeFileSync(logPath, "");
+  } catch {}
 
   const timeout = resolveTimeout(input.timeoutSeconds);
   const proc = startProcess(
     { ...spec, cwd, env: { ...env, BATON_DELEGATION: "1" } },
     timeout.ms,
     deps.spawnImpl ?? spawn,
+    (stream, chunk) => {
+      try {
+        fs.appendFileSync(logPath, chunk);
+      } catch {}
+    },
   );
   const record = {
     taskId: crypto.randomUUID(),
@@ -529,12 +627,19 @@ export async function delegate(input, deps = {}) {
     started,
     adapter,
     sessionId: input.sessionId || null,
+    reasoningEffort: input.reasoningEffort || null,
+    warning: spec.warning || null,
+    logPath,
     before: gitSnapshot(cwd),
     lastMessagePath: spec.lastMessagePath || null,
     proc,
     final: null,
     cancelled: false,
     effectiveTimeoutSeconds: timeout.effectiveSeconds,
+    phase: "thinking",
+    phaseStartedAt: started,
+    lastAction: null,
+    recentEvents: [],
   };
   record.settled = new Promise((resolve) => {
     record.settle = resolve;
@@ -564,6 +669,14 @@ function viewOf(record) {
 const WAIT_PROGRESS_MS = 15_000;
 
 function progressLine(view) {
+  if (view?.phase === "thinking" && (view?.phase_duration_s != null || view?.last_action)) {
+    const dur = view.phase_duration_s != null ? ` (已持续 ${view.phase_duration_s}s)` : "";
+    const action = view.last_action ? ` | 最近: ${view.last_action}` : "";
+    return `等模型思考中${dur}${action}`.slice(0, 200);
+  }
+  if (view?.last_action) {
+    return view.last_action.slice(0, 200);
+  }
   const line = String(view?.output || view?.summary || "").trim().split("\n").filter(Boolean).pop() || "";
   return line.slice(0, 200);
 }

@@ -7,10 +7,15 @@ export const gemini = {
   resolve(env) {
     return which(["gemini"], env);
   },
-  build({ bin, prompt, sessionId }) {
+  build({ bin, prompt, sessionId, reasoningEffort }) {
     const args = ["-p", prompt, "--output-format", "json", "--skip-trust", "--approval-mode", "auto_edit"];
     if (sessionId) args.push("--resume", sessionId);
-    return { command: bin, args, stdin: null };
+    return {
+      command: bin,
+      args,
+      stdin: null,
+      warning: reasoningEffort ? "gemini 暂不支持按单指定 reasoning_effort，保持默认配置。" : undefined,
+    };
   },
   sessionIdFrom(stdout) {
     return sessionFromJson(stdout, ["session_id"]);

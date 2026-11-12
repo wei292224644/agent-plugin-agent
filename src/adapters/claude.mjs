@@ -7,7 +7,7 @@ export const claude = {
   resolve(env) {
     return which(["claude"], env);
   },
-  build({ bin, prompt, sessionId }) {
+  build({ bin, prompt, sessionId, reasoningEffort }) {
     const args = [
       "-p",
       "--output-format",
@@ -17,6 +17,10 @@ export const claude = {
       "--permission-prompts",
       "none",
     ];
+    if (reasoningEffort) {
+      const level = reasoningEffort === "ultra" ? "max" : reasoningEffort;
+      args.push("--effort", level);
+    }
     if (sessionId) args.push("--resume", sessionId);
     args.push(prompt);
     return { command: bin, args, stdin: null };

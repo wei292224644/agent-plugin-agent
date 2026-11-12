@@ -28,6 +28,10 @@ export async function startMcp() {
         target_agent: z.enum(targets),
         prompt: z.string(),
         files: z.array(z.string()).optional(),
+        reasoning_effort: z
+          .enum(["low", "medium", "high", "ultra"])
+          .optional()
+          .describe("按单指定思考档位。支持 low、medium、high、ultra。codex/claude/agy 原生映射，cursor 参数化覆盖，gemini 优雅忽略并在 warning 说明。"),
         timeout_seconds: z
           .number()
           .optional()
@@ -41,6 +45,7 @@ export async function startMcp() {
           target: args.target_agent,
           prompt: args.prompt,
           files: args.files,
+          reasoningEffort: args.reasoning_effort,
           timeoutSeconds: args.timeout_seconds,
           sessionId: args.session_id,
         }),

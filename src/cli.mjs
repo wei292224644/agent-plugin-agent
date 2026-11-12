@@ -5,7 +5,7 @@ import { startMcp } from "./mcp.mjs";
 
 const usage = `用法:
   baton agents
-  baton delegate --target <codex|claude|gemini|agy|cursor> [--prompt <text>] [--session <id>] [--timeout <seconds>] [--file <path>...]
+  baton delegate --target <codex|claude|gemini|agy|cursor> [--prompt <text>] [--session <id>] [--effort <low|medium|high|ultra>] [--timeout <seconds>] [--file <path>...]
   baton status [--task <id>]
   baton wait --task <id> [--task <id>...]
   baton cancel [--task <id>]
@@ -58,6 +58,7 @@ if (command === "mcp") {
     files: asList(args.file),
     timeoutSeconds: args.timeout === true ? undefined : args.timeout,
     sessionId: args.session === true ? undefined : args.session,
+    reasoningEffort: args.effort === true ? undefined : args.effort,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } else if (command === "wait") {

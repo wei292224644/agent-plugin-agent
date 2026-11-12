@@ -9,8 +9,9 @@ export const codex = {
   resolve(env) {
     return which(["codex"], env);
   },
-  build({ bin, cwd, prompt, sessionId }) {
+  build({ bin, cwd, prompt, sessionId, reasoningEffort }) {
     const lastMessagePath = path.join(os.tmpdir(), `baton-codex-${process.pid}-${Date.now()}.txt`);
+    const effortArgs = reasoningEffort ? ["-c", `model_reasoning_effort="${reasoningEffort}"`] : [];
     // `exec resume` 不接受 --cd/--color。--approve-for-me 已使用 workspace-write，不要再加 --sandbox。
     if (sessionId) {
       return {
@@ -22,6 +23,7 @@ export const codex = {
           "--skip-git-repo-check",
           "--output-last-message",
           lastMessagePath,
+          ...effortArgs,
           sessionId,
           "-",
         ],
@@ -42,6 +44,7 @@ export const codex = {
         cwd,
         "--output-last-message",
         lastMessagePath,
+        ...effortArgs,
         "-",
       ],
       stdin: prompt,
