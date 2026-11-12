@@ -21,7 +21,7 @@ function normalizeSnapshot(snapshot) {
 }
 
 export function gitSnapshot(cwd) {
-  const result = spawnSync("git", ["status", "--porcelain"], {
+  const result = spawnSync("git", ["status", "--porcelain", "-uall"], {
     cwd,
     encoding: "utf8",
     timeout: 5000,
@@ -34,10 +34,8 @@ export function gitSnapshot(cwd) {
     const body = line.slice(3);
     const filePath = body.includes(" -> ") ? body.split(" -> ").pop() : body;
     porcelain.set(filePath, line);
-    if (line.startsWith("??")) {
-      const digest = digestFile(cwd, filePath);
-      if (digest) digests.set(filePath, digest);
-    }
+    const digest = digestFile(cwd, filePath);
+    if (digest) digests.set(filePath, digest);
   }
   return { porcelain, digests };
 }
@@ -68,7 +66,18 @@ export function gitChanges(cwd, beforeRaw, afterRaw) {
     return { files_changed: 0, insertions: 0, deletions: 0, diff_stat: "" };
   }
 
-  const tracked = paths.filter((filePath) => !String(after.porcelain.get(filePath) || "").startsWith("??"));
+  const untracked = [];
+  const tracked = [];
+  for (const filePath of paths) {
+    const afterLine = after.porcelain.get(filePath);
+    const beforeLine = before.porcelain.get(filePath);
+    if (afterLine?.startsWith("??") || (!afterLine && beforeLine?.startsWith("??"))) {
+      untracked.push(filePath);
+    } else {
+      tracked.push(filePath);
+    }
+  }
+
   let diffStat = "";
   let insertions = 0;
   let deletions = 0;
@@ -83,13 +92,16 @@ export function gitChanges(cwd, beforeRaw, afterRaw) {
     insertions = Number(diffStat.match(/(\d+) insertion/)?.[1] || 0);
     deletions = Number(diffStat.match(/(\d+) deletion/)?.[1] || 0);
   }
-  const untracked = paths.filter((filePath) => String(after.porcelain.get(filePath) || "").startsWith("??"));
   if (untracked.length) {
     const extras = [];
     for (const filePath of untracked) {
-      const added = untrackedInsertions(cwd, filePath);
-      insertions += added;
-      extras.push(`${filePath} | untracked +${added}`);
+      if (after.porcelain.has(filePath)) {
+        const added = untrackedInsertions(cwd, filePath);
+        insertions += added;
+        extras.push(`${filePath} | untracked +${added}`);
+      } else {
+        extras.push(`${filePath} | untracked deleted`);
+      }
     }
     const extra = extras.join("\n");
     diffStat = diffStat ? `${diffStat}\n${extra}` : extra;
