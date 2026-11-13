@@ -44,8 +44,50 @@ test("cursor 真实 stream-json：session、工具、消息，思考增量不出
   assert.deepEqual(events[2], { ...events[2], name: "shell", ok: true, detail: "cat a.txt" });
   const last = events.at(-1);
   assert.equal(last?.type === "message" && last.text, "hi");
-  assert.deepEqual(cursor.build({ bin: "c", cwd: "/w", prompt: "p", sessionId: "s1", reasoningEffort: "low" }).args,
-    ["--print", "--force", "--trust", "--output-format", "stream-json", "--workspace", "/w", "--model", "auto[effort=low]", "--resume", "s1", "p"]);
+});
+
+test("模型与档位同时传给 codex/claude/agy，fresh 和 resume 均保留", () => {
+  for (const target of ["codex", "claude", "agy"]) {
+    const adapter = getAdapter(target)!;
+    for (const sessionId of [null, "session-1"]) {
+      const input = { bin: "fake", cwd: "/w", prompt: "p", sessionId, reasoningEffort: "low" as const, model: "chosen-model" };
+      const { args } = adapter.build(input);
+      assert.equal(args[args.indexOf("--model") + 1], "chosen-model", target);
+      assert.ok(target === "codex" ? args.includes('model_reasoning_effort="low"') : args.includes("--effort"));
+      if (sessionId) assert.ok(args.includes(sessionId));
+      assert.ok(!adapter.build({ ...input, model: undefined }).args.includes("--model"));
+    }
+  }
+});
+
+test("Cursor 从实际模型列表选档位，保留 fast，不忽略不支持的组合", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "baton-cursor-model-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const bin = path.join(dir, "cursor-agent");
+  fs.writeFileSync(bin, "#!/bin/sh\n[ \"$1\" = models ] || exit 2\ncat <<'MODELS'\nAvailable models\nclaude-opus-4-8-low - Opus Low\nclaude-opus-4-8-high - Opus High\nclaude-opus-4-8-max - Opus Max\nclaude-opus-4-8-low-fast - Opus Low Fast\ngpt-5.3-codex-high - Codex High\ngpt-5.3-codex-xhigh - Codex Extra High\ncomposer-2.5 - Composer\nMODELS\n", { mode: 0o755 });
+  const cursor = getAdapter("cursor")!;
+  for (const sessionId of [null, "session-1"]) {
+    const input = { bin, cwd: "/w", prompt: "p", sessionId, reasoningEffort: "low" as const, model: "claude-opus-4-8-high" };
+    for (const [model, reasoningEffort, expected] of [
+      ["claude-opus-4-8-high", "low", "claude-opus-4-8-low"],
+      ["claude-opus-4-8", "ultra", "claude-opus-4-8-max"],
+      ["gpt-5.3-codex-high", "ultra", "gpt-5.3-codex-xhigh"],
+      ["claude-opus-4-8-low-fast", "low", "claude-opus-4-8-low-fast"],
+    ] as const) {
+      const { args } = cursor.build({ ...input, model, reasoningEffort });
+      assert.equal(args[args.indexOf("--model") + 1], expected);
+      if (sessionId) assert.ok(args.includes(sessionId));
+    }
+    assert.throws(() => cursor.build({ ...input, model: "composer-2.5" }), /effort/);
+    assert.throws(() => cursor.build({ ...input, model: "claude-opus-4-8-high-fast", reasoningEffort: "high" }), /effort/);
+    assert.throws(() => cursor.build({ ...input, model: undefined }), /model/);
+    assert.throws(() => cursor.build({ ...input, model: "auto" }), /model/);
+    const { args } = cursor.build({ ...input, bin: "unused", model: "custom[effort=high]", reasoningEffort: null });
+    assert.equal(args[args.indexOf("--model") + 1], "custom[effort=high]");
+    assert.ok(!cursor.build({ ...input, bin: "unused", model: undefined, reasoningEffort: null }).args.includes("--model"));
+  }
+  fs.writeFileSync(bin, "#!/bin/sh\necho 'catalog unavailable' >&2\nexit 1\n", { mode: 0o755 });
+  assert.throws(() => cursor.build({ bin, cwd: "/w", prompt: "p", sessionId: null, model: "claude-opus-4-8", reasoningEffort: "low" }), /catalog unavailable/);
 });
 
 test("agy 真实 stream-json：工具步骤成对，完整回复只从 result 出一次，不留 raw", () => {

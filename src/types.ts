@@ -11,6 +11,7 @@ export type TaskMeta = {
   status: TaskStatus;
   turn: number;
   session_id: string | null;
+  model?: string;
   reasoning_effort?: Effort;
   idle_timeout_s: number;
   max_duration_s: number | null;
@@ -41,7 +42,7 @@ export type SpawnSpec = {
 export type Adapter = {
   id: Target;
   resolve(env: NodeJS.ProcessEnv): string | null;
-  build(input: { bin: string; cwd: string; prompt: string; sessionId: string | null; reasoningEffort: Effort | null }): SpawnSpec;
+  build(input: { bin: string; cwd: string; prompt: string; sessionId: string | null; model?: string; reasoningEffort: Effort | null }): SpawnSpec;
   parseLine(line: string): BatonEvent[] | null;
   sessionIdFrom(line: string): string | null;
   isAuthFailure(text: string): boolean;

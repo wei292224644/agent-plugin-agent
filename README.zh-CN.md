@@ -286,7 +286,7 @@ node src/cli.ts agents
 
 ```bash
 baton agents
-baton start --target <codex|claude|cursor|agy> [--prompt <text> | stdin] [--file <p>...] [--effort low|medium|high|ultra]
+baton start --target <codex|claude|cursor|agy> [--prompt <text> | stdin] [--file <p>...] [--model <name>] [--effort low|medium|high|ultra]
             [--idle-timeout <秒>] [--max-duration <秒>] [--cwd <dir>]
 baton status <id>
 baton wait <id>... [--for <秒>]       # 默认 50；任一任务离开 running 就返回它，到点仍在跑就返回 running 视图
@@ -298,7 +298,10 @@ baton prune --older <天数>            # 删除早于 N 天的非 running 任�
 baton mcp                             # 启动 MCP 服务（stdio）
 ```
 
-- `--effort` 映射到各家原生参数：Codex `-c model_reasoning_effort=...`；Claude/Agy `--effort`（`ultra` 映射为 `max`）；Cursor `--model auto[effort=...]`。
+- `--model` 指定目标 CLI 的模型，不填时使用该 CLI 自己的默认模型。模型和档位按任务保存，每一轮 `reply` 都沿用。
+- `--effort` 映射到各家原生参数：Codex `-c model_reasoning_effort=...`；Claude/Agy `--effort`（`ultra` 映射为 `max`）。这些 CLI 自行校验模型名和支持的档位组合。
+- Cursor 用 `cursor-agent models` 查看模型 ID。同时指定模型和档位时，Baton 从实时列表中选择同一模型的档位变体，并保留 `-fast`；`ultra` 优先选择 `max`，其次是可用的 `xhigh` 或 `extra-high`。例如 `--model claude-opus-4-8 --effort low` 会选择 `claude-opus-4-8-low`。不支持的组合明确失败；Auto 不支持独立档位，传 `--effort` 时需要指定模型。
+- Cursor 的[官方 CLI 参数页](https://cursor.com/docs/cli/reference/parameters)记录了 `--model`。本机 2026.11.11 的帮助还列出括号覆盖语法，但当前账号拒绝 `auto[effort=low]` 等部分覆盖写法，因此组合设置时采用实际列出的模型 ID。仅指定模型、不传 `--effort` 时，模型名原样传给 Cursor。
 - `--idle-timeout` 默认 600：连续这么久没有任何输出字节才停掉。`--max-duration` 默认不限。两者都按单轮计时，`reply` 开新一轮时重新计时。
 
 ### 状态与存活判定
@@ -339,7 +342,7 @@ MCP 是同一套逻辑的薄壳，进程里不存任何任务状态，重启 MCP
 | 工具 | 对应命令 |
 |---|---|
 | `list_agents` | `agents` |
-| `delegate_task` | `start`（参数 `target_agent`、`prompt`、`files`、`reasoning_effort`、`idle_timeout_seconds`、`max_duration_seconds`、`cwd`） |
+| `delegate_task` | `start`（参数 `target_agent`、`prompt`、`files`、`model`、`reasoning_effort`、`idle_timeout_seconds`、`max_duration_seconds`、`cwd`） |
 | `task_status` | `status` |
 | `task_wait` | `wait`（参数 `task_ids`、`wait_seconds`，默认 50，上限 55；等待期间每 15 秒发一次进度通知） |
 | `task_reply` | `reply`（参数 `task_id`、`prompt`、`as`） |

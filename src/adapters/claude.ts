@@ -23,10 +23,11 @@ export const claude: Adapter = {
   resolve(env) {
     return which(["claude"], env);
   },
-  build({ bin, prompt, sessionId, reasoningEffort }) {
+  build({ bin, prompt, sessionId, model, reasoningEffort }) {
     // stream-json 在 -p 下必须配 --verbose。
     const args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--permission-prompts", "none"];
     if (reasoningEffort) args.push("--effort", reasoningEffort === "ultra" ? "max" : reasoningEffort);
+    if (model) args.push("--model", model);
     if (sessionId) args.push("--resume", sessionId);
     args.push(prompt);
     return { command: bin, args, stdin: null };

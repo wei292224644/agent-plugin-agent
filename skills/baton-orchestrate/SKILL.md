@@ -109,6 +109,7 @@ Rules:
 - Do not delegate to the CLI vendor this host session already is
 - Max 3 jobs running at once unless the host approves more
 - Use --effort low for mechanical subtasks; raise --idle-timeout for slow, silent models
+- Honor the user's --model selection; model and effort persist across replies. Cursor needs an explicit model for --effort (see cursor-agent models); unsupported combinations fail
 - Path-disjoint ready jobs may run in parallel; overlapping paths stay serialized
 - Wait on all live jobs together with `wait <ids...> --for 50`, repeating; never wait one job after another
 - needs_input: ask the host unless earlier instructions decide it; relay the answer with `reply --as human`

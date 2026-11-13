@@ -103,7 +103,7 @@ export async function supervise(id: string): Promise<void> {
   try {
     const bin = adapter.resolve(process.env);
     if (!bin) throw new Error(`${meta.target} 不在 PATH 里。`);
-    spec = adapter.build({ bin, cwd: meta.cwd, prompt: buildPrompt(turn.prompt, turn.files), sessionId: meta.session_id, reasoningEffort: meta.reasoning_effort ?? null });
+    spec = adapter.build({ bin, cwd: meta.cwd, prompt: buildPrompt(turn.prompt, turn.files), sessionId: meta.session_id, model: meta.model, reasoningEffort: meta.reasoning_effort ?? null });
     meta.warning = spec.warning;
     if (spec.lastMessagePath) {
       fs.writeFileSync(spec.lastMessagePath, "", { mode: 0o600, flag: "wx" });

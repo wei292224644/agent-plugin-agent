@@ -39,7 +39,7 @@ test("start 在 1s 内返回，SIGKILL 发起父进程后 supervisor 仍写出 s
 
 test("start 拒绝递归、缺少参数与未安装，stdout 错误也为单个 JSON", async (t) => {
   const s = sandbox(t);
-  for (const args of [["start"], ["start", "--target", "codex", "--prompt", "hi", "--idle-timeout", "0"], ["status", "../x"]]) {
+  for (const args of [["start"], ["start", "--target", "codex", "--prompt", "hi", "--idle-timeout", "0"], ["start", "--target", "codex", "--prompt", "hi", "--model", " "], ["status", "../x"]]) {
     await assert.rejects(exec(process.execPath, [cli, ...args], { cwd: s.cwd, env: s.env }), (error: unknown) => {
       const e = error as { stdout: string; code: number };
       assert.ok(e.code !== 0); assert.equal(JSON.parse(e.stdout).status, "failed"); return true;
@@ -163,9 +163,15 @@ test("needs_input → reply 续同一 session，记录 human/host 作者与原�
   const s = sandbox(t);
   const decision = { type: "item.completed", item: { type: "agent_message", text: "BATON_DECISION\nquestion: 选哪个？\noptions: A | B\nBATON_END" } };
   fs.writeFileSync(s.fixture, `${JSON.stringify({ type: "thread.started", thread_id: "thread-fake-1" })}\n${JSON.stringify(decision)}\n`);
-  const first = await s.run("start", "--target", "codex", "--prompt", "ask", "--max-duration", "0.6");
+  s.env.FAKE_ARGS_FILE = path.join(s.home, "argv.txt");
+  const first = await s.run("start", "--target", "codex", "--prompt", "ask", "--max-duration", "0.6", "--model", "chosen-model", "--effort", "low");
   const pending = await s.until(first.task_id);
   assert.equal(pending.status, "needs_input");
+  assert.equal(pending.model, "chosen-model");
+  assert.equal(pending.reasoning_effort, "low");
+  const initialArgs = fs.readFileSync(s.env.FAKE_ARGS_FILE, "utf8").trim().split("\n");
+  assert.equal(initialArgs[initialArgs.indexOf("--model") + 1], "chosen-model");
+  assert.ok(initialArgs.includes('model_reasoning_effort="low"'));
   assert.deepEqual(pending.decision, { question: "选哪个？", options: ["A", "B"] });
   await sleep(650);
   fs.writeFileSync(s.fixture, `${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "BATON_RESULT\nsummary: continued\nBATON_END" } })}\n`);
@@ -177,12 +183,16 @@ test("needs_input → reply 续同一 session，记录 human/host 作者与原�
   assert.equal(next.turn, 2);
   const done = await s.until(first.task_id);
   assert.equal(done.status, "success");
+  assert.equal(done.model, "chosen-model");
+  assert.equal(done.reasoning_effort, "low");
   assert.equal(done.decision, undefined);
   assert.equal(s.turn(first.task_id, 2).author, "human");
   assert.equal(s.turn(first.task_id, 2).prompt, "A");
   assert.equal(s.turn(first.task_id, 1).status, "needs_input");
   const args = fs.readFileSync(s.env.FAKE_ARGS_FILE, "utf8").trim().split("\n");
   assert.deepEqual(args.slice(0, 3), ["exec", "resume", "--json"]);
+  assert.equal(args[args.indexOf("--model") + 1], "chosen-model");
+  assert.ok(args.includes('model_reasoning_effort="low"'));
   assert.equal(args.at(-2), "thread-fake-1");
   assert.match(fs.readFileSync(s.env.FAKE_INPUT_FILE, "utf8"), /^A\n\n完成前/);
   assert.ok(s.events(first.task_id).every((event) => event.turn >= 1));

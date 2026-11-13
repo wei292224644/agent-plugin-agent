@@ -48,11 +48,12 @@ If not named, use `codex`. If the current session is already Codex, use `claude`
 ## Start
 
 ```
-baton start --target <t> --prompt "<self-contained task>" [--file <path>...] [--effort low|medium|high|ultra] [--idle-timeout <s>] [--max-duration <s>]
+baton start --target <t> --prompt "<self-contained task>" [--file <path>...] [--model <name>] [--effort low|medium|high|ultra] [--idle-timeout <s>] [--max-duration <s>]
 ```
 
 - The prompt states done criteria and which files to look at. Long prompts can come on stdin instead of `--prompt`.
 - `--effort low` suits mechanical subtasks; it maps to each CLI's native flag.
+- Pass `--model` when the user selects a model. Model and effort persist across replies. For Cursor, choose a model from `cursor-agent models` before setting effort; Auto cannot take a separate effort, and unsupported combinations fail instead of being ignored.
 - `--idle-timeout` (default 600) stops the job only after that many seconds with no output at all. There is no total time cap unless you pass `--max-duration`. Raise `--idle-timeout` for models that think silently for a long time.
 - It returns at once with `task_id` and `status: "running"`. Keep the `task_id`. Tell the user they can watch live with `baton tail -f <task_id>`.
 

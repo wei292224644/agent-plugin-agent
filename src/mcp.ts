@@ -26,6 +26,7 @@ export function createServer(): McpServer {
       target_agent: z.enum(["codex", "claude", "cursor", "agy"]),
       prompt: z.string(),
       files: z.array(z.string()).optional(),
+      model: z.string().optional().describe("目标 CLI 的模型名；与 reasoning_effort 一起保存，并在 reply 时沿用。"),
       reasoning_effort: z.enum(["low", "medium", "high", "ultra"]).optional(),
       idle_timeout_seconds: z.number().optional().describe("连续这么久没有任何输出就停掉，默认 600。"),
       max_duration_seconds: z.number().optional().describe("单轮总时长上限，默认不限。"),
@@ -33,7 +34,7 @@ export function createServer(): McpServer {
     },
   }, (args) => respond(() => start({
     target: args.target_agent, prompt: args.prompt, files: args.files, cwd: args.cwd,
-    reasoningEffort: args.reasoning_effort as Effort | undefined,
+    model: args.model, reasoningEffort: args.reasoning_effort as Effort | undefined,
     idleTimeout: args.idle_timeout_seconds, maxDuration: args.max_duration_seconds,
   })));
   server.registerTool("task_status", {

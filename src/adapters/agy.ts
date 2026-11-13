@@ -17,9 +17,10 @@ export const agy: Adapter = {
   resolve(env) {
     return which(["agy"], env);
   },
-  build({ bin, prompt, sessionId, reasoningEffort }) {
+  build({ bin, prompt, sessionId, model, reasoningEffort }) {
     const args = ["--print", prompt, "--mode", "accept-edits", "--output-format", "stream-json"];
     if (reasoningEffort) args.push("--effort", reasoningEffort === "ultra" ? "max" : reasoningEffort);
+    if (model) args.push("--model", model);
     if (sessionId) args.push("--conversation", sessionId);
     return { command: bin, args, stdin: null };
   },

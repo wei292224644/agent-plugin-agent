@@ -87,6 +87,7 @@ type TaskMeta = {
   status: TaskStatus;
   turn: number;                // 当前或最近一轮，从 1 开始
   session_id: string | null;   // 子 CLI 的会话 id，reply 用
+  model?: string;              // 创建时选择的模型，每轮沿用
   reasoning_effort?: "low" | "medium" | "high" | "ultra";
   idle_timeout_s: number;
   max_duration_s: number | null;
@@ -162,7 +163,7 @@ type Adapter = {
   id: Target;
   resolve(env: NodeJS.ProcessEnv): string | null;
   build(input: { bin: string; cwd: string; prompt: string; sessionId: string | null;
-                 reasoningEffort: Effort | null }): SpawnSpec;
+                 model?: string; reasoningEffort: Effort | null }): SpawnSpec;
   parseLine(line: string): BatonEvent[] | null;   // null 表示不认识，记为 raw
   sessionIdFrom(line: string): string | null;
   isAuthFailure(text: string): boolean;
@@ -187,7 +188,7 @@ type Adapter = {
 
 ```
 baton agents
-baton start --target <t> [--prompt <text> | stdin] [--file <p>...] [--effort <e>]
+baton start --target <t> [--prompt <text> | stdin] [--file <p>...] [--model <name>] [--effort <e>]
             [--idle-timeout <s>] [--max-duration <s>] [--cwd <dir>]
 baton status <id>
 baton wait <id>... [--for <s>]     # 默认 50s；任一任务离开 running 即返回该任务，到点仍在跑就返回 running 视图
@@ -201,6 +202,8 @@ baton mcp
 
 - 内部命令 `baton _supervise <id>` 不写进帮助文本。
 - 移除旧的 `delegate` 子命令；`wait` 合并了旧的单任务等待和 `wait_any`。
+- `start` / MCP `delegate_task` 接收可选 `model`，与 `reasoning_effort` 一起写入 meta；`reply` 每轮沿用。未指定模型时不覆盖 CLI 默认值，空模型名拒绝。
+- Cursor 同时指定模型和档位时从 `cursor-agent models` 中选择同一家族的档位变体（保留 fast，ultra 优先 max、其次 xhigh/extra-high），不支持时失败；effort 不能与 Auto 搭配。仅指定模型时原样传递。此规则避免本机帮助宣传但实际被拒绝的部分括号覆盖语法。
 
 开发命令：
 

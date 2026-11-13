@@ -286,7 +286,7 @@ Every command prints exactly one JSON object (except `tail`) and exits non-zero 
 
 ```bash
 baton agents
-baton start --target <codex|claude|cursor|agy> [--prompt <text> | stdin] [--file <p>...] [--effort low|medium|high|ultra]
+baton start --target <codex|claude|cursor|agy> [--prompt <text> | stdin] [--file <p>...] [--model <name>] [--effort low|medium|high|ultra]
             [--idle-timeout <s>] [--max-duration <s>] [--cwd <dir>]
 baton status <id>
 baton wait <id>... [--for <s>]       # default 50; returns the first job that leaves running, or the running view on timeout
@@ -298,7 +298,10 @@ baton prune --older <days>           # delete non-running task directories older
 baton mcp                            # start the MCP server (stdio)
 ```
 
-- `--effort` maps to each CLI's native flag: Codex `-c model_reasoning_effort=...`; Claude/Agy `--effort` (`ultra` becomes `max`); Cursor `--model auto[effort=...]`.
+- `--model` selects the target CLI's model. Omit it to use that CLI's default. Model and effort are saved per task and reused on every `reply`.
+- `--effort` maps to each CLI's native flag: Codex `-c model_reasoning_effort=...`; Claude/Agy `--effort` (`ultra` becomes `max`). These CLIs validate model names and supported effort combinations themselves.
+- For Cursor, use `cursor-agent models` to find model IDs. With both options set, Baton selects a matching effort variant from that live list, preserving `-fast`; `ultra` chooses `max`, then `xhigh` or `extra-high` if available. For example, `--model claude-opus-4-8 --effort low` selects `claude-opus-4-8-low`. Unsupported combinations fail explicitly. Auto cannot take an independent effort: select a model when passing `--effort`.
+- Cursor's [CLI reference](https://cursor.com/docs/cli/reference/parameters) documents `--model`. The local 2026.11.11 help also advertises bracket overrides, but this account rejects partial forms such as `auto[effort=low]`; Baton therefore uses listed model IDs when combining options. A model supplied without `--effort` is passed through unchanged.
 - `--idle-timeout` defaults to 600: the job stops only after that many seconds without a single output byte. `--max-duration` is unlimited by default. Both apply per turn and restart on `reply`.
 
 ### Statuses and liveness
@@ -339,7 +342,7 @@ MCP is a thin shell over the same logic. It keeps no task state, so restarting M
 | Tool | Command |
 |---|---|
 | `list_agents` | `agents` |
-| `delegate_task` | `start` (`target_agent`, `prompt`, `files`, `reasoning_effort`, `idle_timeout_seconds`, `max_duration_seconds`, `cwd`) |
+| `delegate_task` | `start` (`target_agent`, `prompt`, `files`, `model`, `reasoning_effort`, `idle_timeout_seconds`, `max_duration_seconds`, `cwd`) |
 | `task_status` | `status` |
 | `task_wait` | `wait` (`task_ids`, `wait_seconds` default 50, max 55; sends a progress notification every 15 seconds) |
 | `task_reply` | `reply` (`task_id`, `prompt`, `as`) |

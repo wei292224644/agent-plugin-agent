@@ -10,7 +10,7 @@ import { redact } from "./redact.ts";
 import { isAlive, killGroup } from "./process.ts";
 import type { Author, Effort, GitChanges, TaskMeta } from "./types.ts";
 
-export type StartInput = { target: string; prompt: string; cwd?: string; files?: string[]; reasoningEffort?: Effort; idleTimeout?: number; maxDuration?: number };
+export type StartInput = { target: string; prompt: string; cwd?: string; files?: string[]; model?: string; reasoningEffort?: Effort; idleTimeout?: number; maxDuration?: number };
 export type StartResult = TaskMeta | { status: "failed" | "not_installed"; summary: string };
 
 function positive(value: number, name: string): number {
@@ -40,13 +40,14 @@ export async function start(input: StartInput): Promise<StartResult> {
   const idle = positive(input.idleTimeout ?? 600, "idle_timeout");
   const max = input.maxDuration == null ? null : positive(input.maxDuration, "max_duration");
   if (input.reasoningEffort && !["low", "medium", "high", "ultra"].includes(input.reasoningEffort)) throw new Error("未知 effort。");
+  if (input.model !== undefined && (typeof input.model !== "string" || !input.model.trim())) throw new Error("model 必须为非空字符串。");
   const cwd = path.resolve(input.cwd || process.env.BATON_CWD || process.cwd());
   if (!fs.statSync(cwd).isDirectory()) throw new Error("cwd 必须是目录。");
   if (!adapter.resolve(process.env)) return { status: "not_installed", summary: `${input.target} 不在 PATH 里。` };
   const now = new Date().toISOString();
   const meta: TaskMeta = {
     task_id: randomUUID(), target: adapter.id, cwd, created_at: now, updated_at: now,
-    status: "running", turn: 1, session_id: null, reasoning_effort: input.reasoningEffort,
+    status: "running", turn: 1, session_id: null, model: input.model, reasoning_effort: input.reasoningEffort,
     idle_timeout_s: idle, max_duration_s: max, supervisor_pid: null, child_pid: null,
     heartbeat_at: null, last_event_at: null,
   };

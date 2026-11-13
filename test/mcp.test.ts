@@ -23,17 +23,22 @@ test("MCP 薄壳：工具清单、派工、有界等待、续轮、列表、取�
   assert.deepEqual(names, ["delegate_task", "list_agents", "task_cancel", "task_list", "task_reply", "task_status", "task_wait"]);
   assert.ok((await call(client, "list_agents")).agents.some((a: any) => a.id === "codex" && a.installed));
 
-  const started = await call(client, "delegate_task", { target_agent: "codex", prompt: "hi", cwd: s.cwd });
+  const started = await call(client, "delegate_task", { target_agent: "codex", prompt: "hi", cwd: s.cwd, model: "chosen-model", reasoning_effort: "low" });
   assert.equal(started.status, "running");
+  assert.equal(started.model, "chosen-model");
+  assert.equal(started.reasoning_effort, "low");
   // MCP 重启后仍能读到同一单：MCP 进程里不保存任务状态。
   await client.close();
   client = await connect(s.env);
   const done = await call(client, "task_wait", { task_ids: [started.task_id], wait_seconds: 10 });
   assert.equal(done.status, "success");
+  assert.equal(done.model, "chosen-model");
   assert.equal((await call(client, "task_status", { task_id: started.task_id })).status, "success");
 
   const again = await call(client, "task_reply", { task_id: started.task_id, prompt: "more", as: "human" });
   assert.equal(again.status, "running");
+  assert.equal(again.model, "chosen-model");
+  assert.equal(again.reasoning_effort, "low");
   assert.equal((await call(client, "task_wait", { task_ids: [started.task_id], wait_seconds: 10 })).turn, 2);
   assert.ok((await call(client, "task_list", { all: true })).tasks.some((task: any) => task.task_id === started.task_id));
 

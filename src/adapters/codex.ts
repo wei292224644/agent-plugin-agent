@@ -11,9 +11,10 @@ export const codex: Adapter = {
   resolve(env) {
     return which(["codex"], env);
   },
-  build({ bin, cwd, prompt, sessionId, reasoningEffort }) {
+  build({ bin, cwd, prompt, sessionId, model, reasoningEffort }) {
     const lastMessagePath = path.join(os.tmpdir(), `baton-codex-${process.pid}-${Date.now()}.txt`);
     const effortArgs = reasoningEffort ? ["-c", `model_reasoning_effort="${reasoningEffort}"`] : [];
+    const modelArgs = model ? ["--model", model] : [];
     // `exec resume` 不接受 --cd/--color。--approve-for-me 已使用 workspace-write，不要再加 --sandbox。
     if (sessionId) {
       return {
@@ -26,6 +27,7 @@ export const codex: Adapter = {
           "--output-last-message",
           lastMessagePath,
           ...effortArgs,
+          ...modelArgs,
           sessionId,
           "-",
         ],
@@ -47,6 +49,7 @@ export const codex: Adapter = {
         "--output-last-message",
         lastMessagePath,
         ...effortArgs,
+        ...modelArgs,
         "-",
       ],
       stdin: prompt,
