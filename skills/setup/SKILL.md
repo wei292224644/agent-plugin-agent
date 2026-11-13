@@ -17,7 +17,7 @@ Do not run npm in the user's project. Use the first directory that contains `scr
 1. `$CLAUDE_PLUGIN_ROOT`
 2. `$CURSOR_PLUGIN_ROOT`
 3. Two directories above the loaded `skills/setup/SKILL.md`
-4. The directory that contains `src/mcp.mjs` on the `ERR_MODULE_NOT_FOUND` stack
+4. The directory that contains `src/mcp.ts` on the `ERR_MODULE_NOT_FOUND` stack
 
 If none of these exist, stop and tell the user the plugin root was not found.
 

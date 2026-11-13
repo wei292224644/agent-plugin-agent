@@ -2,7 +2,7 @@
   "mcpServers": {
     "baton": {
       "command": "node",
-      "args": ["${CURSOR_PLUGIN_ROOT}/src/cli.mjs", "mcp"]
+      "args": ["${CURSOR_PLUGIN_ROOT}/src/cli.ts", "mcp"]
     }
   }
 }
