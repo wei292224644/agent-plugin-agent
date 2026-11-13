@@ -2,10 +2,12 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-> Decentralized local AI Agent bridge: **Any Agent as Host, Any Agent as Worker**.  
-> Your current CLI or IDE acts as the Host, delegating bounded coding tasks to other installed local Agent CLIs (Workers) via a standard MCP tool, directly spending their respective subscription quotas. The runner assembles sanitized arguments and safe execution environments so models never have to string together fragile shell commands.
+> A local compute bridge for AI agents: **Any Agent as Host, Any Agent as Worker**.
+> The CLI/IDE you are using is the Host. It hands bounded coding tasks to other agent CLIs installed on the same machine (Workers), spending their subscriptions. Each task runs in its own process with its state on disk, can run as long as it needs, and can be watched at any time.
 
-Supported platforms: `claude` (Claude Code), `agy` (Antigravity), `codex` (Codex CLI / App), `cursor` (Cursor Agent CLI / IDE), and `gemini` (Gemini CLI).
+Delegation targets: `claude` (Claude Code), `codex` (Codex CLI), `cursor` (Cursor Agent CLI), `agy` (Antigravity).
+
+> **0.3.0 is a breaking release.** See [Upgrading from 0.2.x](#upgrading-from-02x).
 
 ---
 
@@ -13,59 +15,38 @@ Supported platforms: `claude` (Claude Code), `agy` (Antigravity), `codex` (Codex
 
 - [How It Works](#how-it-works)
 - [Installation](#installation)
-  - [Prerequisites](#prerequisites)
-  - [Claude Code](#claude-code)
-  - [Antigravity (agy)](#antigravity-agy)
-  - [Codex CLI](#codex-cli)
-  - [Codex App](#codex-app)
-  - [Cursor (Agent CLI & IDE)](#cursor-agent-cli--ide)
-  - [Gemini CLI](#gemini-cli)
-  - [Generic MCP Clients (Claude Desktop / Windsurf / etc.)](#generic-mcp-clients-claude-desktop--windsurf--etc)
 - [Verify Installation](#verify-installation)
-- [Workflows & Usage](#workflows--usage)
-  - [In-Host Auto Delegation (Rescue Skill)](#in-host-auto-delegation-rescue-skill)
-  - [Direct CLI Usage](#direct-cli-usage)
-  - [Interactive Decisions & Session Resumption (needs_decision)](#interactive-decisions--session-resumption-needs_decision)
-  - [Progress While the Worker Runs](#progress-while-the-worker-runs)
+- [Usage](#usage)
+  - [Skills in the host](#skills-in-the-host)
+  - [Command line](#command-line)
+  - [Statuses and liveness](#statuses-and-liveness)
+  - [Questions and follow-up turns (needs_input / reply)](#questions-and-follow-up-turns-needs_input--reply)
+  - [MCP tools](#mcp-tools)
+- [Task directory ~/.baton](#task-directory-baton)
 - [Underlying Calling Conventions](#underlying-calling-conventions)
-- [Safety & Deadlock Prevention](#safety--deadlock-prevention)
+- [Safety](#safety)
 - [Manual Smoke Testing](#manual-smoke-testing)
 - [Development & Testing](#development--testing)
+- [Upgrading from 0.2.x](#upgrading-from-02x)
 
 ---
 
 ## How It Works
 
 ```
-[ Active Terminal / Editor (Host) ] (e.g. Claude Code / Cursor / Agy)
-              │
-              │  (1) MCP Tool Call: delegate_task(target_agent="codex", prompt="...")
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Baton (Local Peer Bridge / MCP)             │
-│                                                             │
-│  • Injects safety envelopes (BATON_DELEGATION=1)            │
-│  • Formats target-specific CLI flags (non-interactive/JSON) │
-│  • Manages sub-process lifecycle & timeout watchdogs        │
-└─────────────────────────────────────────────────────────────┘
-              │
-              │  (2) Drives target CLI (e.g.: codex exec --json ...)
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Target Execution (Worker Agent)             │
-│                                                             │
-│  • Consumes target platform's own subscription/tokens       │
-│  • Reads and writes local workspace files directly          │
-└─────────────────────────────────────────────────────────────┘
-              │
-              │  (3) Changes committed to disk & process exits
-              ▼
-[ Extract git diff & structured summary ] ──> Returns to Host to continue flow
+Host CLI ──shell──> baton start ──spawns a detached supervisor──> baton _supervise <id>
+   │                    │ (returns task_id at once)                 │ owns the worker's process group
+   │                    ▼                                           │ parses streamed output → events
+   │            ~/.baton/tasks/<id>/  <──────── single writer ──────┘
+   │                    ▲
+   └──shell/MCP──> baton status / wait / tail / reply / cancel / ls
 ```
 
-- **Zero Extra API Keys**: Seamlessly reuses existing authenticated sessions and subscriptions in each installed CLI.
-- **Context Sanitization**: Worker internal chains-of-thought (CoT), terminal control characters, and progress bars are trapped inside the bridge layer; only clean summaries and `git diff` statistics are passed back to the Host.
-- **Session Preservation**: When a Worker encounters a branching decision or prompt, it returns the questions and options alongside a `session_id`, allowing the user to choose and resume without losing context.
+- **Tasks outlive the host**: the supervisor runs on its own. Closing the host session, restarting MCP, or closing the terminal does not stop the task, and its result can still be read afterwards.
+- **No total time cap**: by default only an idle timeout applies (stop after 600 seconds with no output at all), so slow models can run for hours.
+- **Visible progress**: each CLI's streamed output becomes uniform events (messages, tool calls, tool results, errors). Watch them live with `baton tail -f`; `status` says whether the worker is busy, quietly thinking, or whether its supervisor died.
+- **Turn-based interaction**: when the worker stops to ask a question, a human or the host agent continues the same conversation with `baton reply`. Every turn and its author are recorded.
+- **No extra API keys**: reuses each CLI's existing login and subscription.
 
 ---
 
@@ -75,8 +56,8 @@ Installation differs by harness. Simply copy and paste the commands for your pre
 
 ### Prerequisites
 
-1. **Node.js** >= 18
-2. At least one supported Agent CLI installed and logged in locally (`codex`, `claude`, `agy`, `cursor`, or `gemini`).
+1. **Node.js** >= 24 (runs the TypeScript source directly, no build step)
+2. At least one supported Agent CLI installed and logged in locally (`codex`, `claude`, `agy`, or `cursor`).
 3. After a marketplace install, run `/baton:setup` in the host session. Marketplace install does not run `npm install`; without this step MCP exits because `@modelcontextprotocol/sdk` is missing.
 4. (Optional) If installing from local source or developing:
    ```bash
@@ -214,7 +195,7 @@ In your project's `.cursor/mcp.json` (or global Cursor MCP Settings):
   "mcpServers": {
     "baton": {
       "command": "node",
-      "args": ["<ABSOLUTE_PATH_TO_REPO>/src/cli.mjs", "mcp"]
+      "args": ["<ABSOLUTE_PATH_TO_REPO>/src/cli.ts", "mcp"]
     }
   }
 }
@@ -224,7 +205,7 @@ In your project's `.cursor/mcp.json` (or global Cursor MCP Settings):
 
 ### Gemini CLI
 
-Gemini CLI uses an extension system.
+Gemini CLI uses an extension system. This installs baton into Gemini CLI as the host; delegating tasks to gemini is not supported in 0.3.0.
 
 #### Remote Install
 
@@ -261,7 +242,7 @@ Add the following to your client's MCP configuration JSON:
   "mcpServers": {
     "baton": {
       "command": "node",
-      "args": ["<ABSOLUTE_PATH_TO_REPO>/src/cli.mjs", "mcp"]
+      "args": ["<ABSOLUTE_PATH_TO_REPO>/src/cli.ts", "mcp"]
     }
   }
 }
@@ -271,198 +252,177 @@ Add the following to your client's MCP configuration JSON:
 
 ## Verify Installation
 
-Verify installed agent harnesses and path detection at any time with:
-
 ```bash
-node src/cli.mjs agents
+node src/cli.ts agents
 ```
 
 Example output:
 
 ```json
-[
-  {
-    "id": "codex",
-    "installed": true,
-    "bin": "/opt/homebrew/bin/codex",
-    "version": "codex-cli 0.166.0"
-  },
-  {
-    "id": "claude",
-    "installed": true,
-    "bin": "/Users/user/.local/bin/claude",
-    "version": null
-  },
-  {
-    "id": "agy",
-    "installed": true,
-    "bin": "/Users/user/.local/bin/agy",
-    "version": "1.5.3"
-  },
-  {
-    "id": "cursor",
-    "installed": true,
-    "bin": "/Users/user/.local/bin/cursor-agent",
-    "version": "2026.11.05-86047df"
-  },
-  {
-    "id": "gemini",
-    "installed": true,
-    "bin": "/Users/user/.npm-global/bin/gemini",
-    "version": "0.67.0"
-  }
-]
+{"agents":[{"id":"codex","installed":true,"bin":"/opt/homebrew/bin/codex","version":"codex-cli 0.167.0"},{"id":"claude","installed":true,"bin":"/Users/user/.local/bin/claude","version":"2.1.323 (Claude Code)"},{"id":"cursor","installed":true,"bin":"/Users/user/.local/bin/cursor-agent","version":"2026.11.11-043ef28"},{"id":"agy","installed":true,"bin":"/Users/user/.local/bin/agy","version":"1.5.6"}]}
 ```
 
-Only agents with `"installed": true` can be targeted for delegation.
+Only agents with `installed: true` can be delegation targets.
 
 ---
 
-## Workflows & Usage
+## Usage
 
-### In-Host Auto Delegation (Rescue Skill)
+### Skills in the host
 
-Once installed, your Host Agent automatically registers:
+After installation the host loads three skills:
 
-- [skills/setup/SKILL.md](skills/setup/SKILL.md): `/baton:setup`, install npm dependencies into the plugin directory
-- [skills/baton-rescue/SKILL.md](skills/baton-rescue/SKILL.md): one-shot rescue + wait
-- [skills/baton-orchestrate/SKILL.md](skills/baton-orchestrate/SKILL.md): optional orchestration — background agent holds the graph, per-job review, async host notes, rework / fail-over, summarize (not tied to Speckit / OpenSpec / agent-skills)
+- [skills/setup/SKILL.md](skills/setup/SKILL.md): `/baton:setup`, installs the plugin's npm dependencies
+- [skills/baton-rescue/SKILL.md](skills/baton-rescue/SKILL.md): one hop, bounded waiting, relays or answers the worker's questions
+- [skills/baton-orchestrate/SKILL.md](skills/baton-orchestrate/SKILL.md): several jobs with a dependency graph, per-job review, rework, fail-over, and a summary (does not require Speckit / OpenSpec / agent-skills)
 
-Whenever a complex refactor, debugging task, or second opinion is needed, or whenever you say:
-> "Rescue this refactoring task to Codex"  
-> "Delegate this debugging run to Claude"
+Say something like "rescue this refactor to Codex" and the host runs `baton start` through its shell, then repeats `baton wait --for 50` until the job stops. The skills rely only on shell commands; they do not need the host to have background sub-agents.
 
-Your Host Agent invokes `delegate_task`. That call returns after the worker process is alive, not after the task is finished. The main session then starts a background sub-agent whose only job is `task_wait`. The host wakes the main session when that sub-agent finishes.
+**Routing**: use the target the user names. Otherwise implementation and debugging go to `codex`, or to `claude` when the current session is already Codex. Never delegate to yourself.
 
-For multi-CLI distribution, use `baton-orchestrate`: the host opens an orchestrator sub-agent that holds the plan, advances per job (wait → project review → dispatch dependents), notifies the main session asynchronously, and calls baton MCP. Baton is the transport; process/methodology stays with the workspace.
+### Command line
 
-**Default Routing Rules**:
-- Named target (e.g., "give this to Codex"): Dispatches to requested agent.
-- Unnamed target: Defaults to `codex` for implementation and debugging.
-- Host is already Codex: Automatically falls back to `claude`.
-- **Self-Exclusion**: Never delegates to the active Host.
-
----
-
-### Direct CLI Usage
-
-You can also trigger task delegations directly from the command line:
+Every command prints exactly one JSON object (except `tail`) and exits non-zero on error. `baton` below means `node <plugin-root>/src/cli.ts`.
 
 ```bash
-# 1. Discover available local agents
-node src/cli.mjs agents
-
-# 2. Delegate a task to a specific target
-node src/cli.mjs delegate --target claude --prompt "Reply pong only, do not modify files"
-
-# 3. Specify timeout (seconds) and target files
-node src/cli.mjs delegate --target codex --prompt "Refactor auth and add unit tests" --file src/auth.ts --timeout 600
-
-# 4. Pipe task from standard input (stdin)
-cat prompt.txt | node src/cli.mjs delegate --target agy
-
-# 5. Inspect, wait for, or cancel a worker. Pass --task <id> when several are running here
-node src/cli.mjs status
-node src/cli.mjs wait --task <id>
-node src/cli.mjs cancel
-
-# 6. Start MCP server (stdio mode)
-node src/cli.mjs mcp
+baton agents
+baton start --target <codex|claude|cursor|agy> [--prompt <text> | stdin] [--file <p>...] [--effort low|medium|high|ultra]
+            [--idle-timeout <s>] [--max-duration <s>] [--cwd <dir>]
+baton status <id>
+baton wait <id>... [--for <s>]       # default 50; returns the first job that leaves running, or the running view on timeout
+baton tail <id> [-f] [--raw]         # readable events; -f follows until the job stops; --raw prints events.jsonl lines
+baton reply <id> [--prompt <text> | stdin] [--as host|human]
+baton cancel <id>
+baton ls [--all]                     # jobs for the current directory by default, newest first
+baton prune --older <days>           # delete non-running task directories older than N days
+baton mcp                            # start the MCP server (stdio)
 ```
+
+- `--effort` maps to each CLI's native flag: Codex `-c model_reasoning_effort=...`; Claude/Agy `--effort` (`ultra` becomes `max`); Cursor `--model auto[effort=...]`.
+- `--idle-timeout` defaults to 600: the job stops only after that many seconds without a single output byte. `--max-duration` is unlimited by default. Both apply per turn and restart on `reply`.
+
+### Statuses and liveness
+
+| `status` | Meaning |
+|---|---|
+| `running` | Still working; includes `liveness` and `quiet_for_s` |
+| `needs_input` | The worker asked a question; `decision` holds `question` and `options` |
+| `success` | Turn finished; includes `summary` and this turn's `git_changes` |
+| `failed` / `timed_out` / `cancelled` | Terminal; cannot be replied to |
+| `not_authenticated` / `quota_exceeded` | The target CLI is not logged in / out of quota |
+| `not_installed` | Returned by `start`; the target is not on `PATH` |
+
+`liveness` while `running`:
+
+| `liveness` | Condition |
+|---|---|
+| `active` | Output within the last 60 seconds |
+| `quiet` | Supervisor alive but silent for more than 60 seconds (usually thinking) |
+| `orphaned` | Supervisor gone or heartbeat older than 30 seconds; the next read kills leftover processes and records `failed` |
+
+### Questions and follow-up turns (needs_input / reply)
+
+Baton appends an output contract to every prompt: ask with a `BATON_DECISION` block when a choice is needed, finish with a `BATON_RESULT` block. When the worker asks, the task moves to `needs_input` and the worker process exits normally.
+
+```bash
+baton reply <id> --as human --prompt "A"
+```
+
+- Starts the next turn in the same conversation. `--as human` marks the words as the user's; the default `--as host` is for answers the host gives from the user's earlier instructions.
+- `reply` also works after `success` for a follow-up. While the job is `running`, `reply` returns `busy`.
+- Each turn's author, input, and result are stored in `turns/<n>.json`.
+
+### MCP tools
+
+MCP is a thin shell over the same logic. It keeps no task state, so restarting MCP does not affect running jobs:
+
+| Tool | Command |
+|---|---|
+| `list_agents` | `agents` |
+| `delegate_task` | `start` (`target_agent`, `prompt`, `files`, `reasoning_effort`, `idle_timeout_seconds`, `max_duration_seconds`, `cwd`) |
+| `task_status` | `status` |
+| `task_wait` | `wait` (`task_ids`, `wait_seconds` default 50, max 55; sends a progress notification every 15 seconds) |
+| `task_reply` | `reply` (`task_id`, `prompt`, `as`) |
+| `task_cancel` | `cancel` |
+| `task_list` | `ls` (`all`, `cwd`) |
 
 ---
 
-### Interactive Decisions & Session Resumption (needs_decision)
+## Task directory ~/.baton
 
-`delegate_task` accepts the following arguments:
-- `target_agent`: `codex` | `claude` | `gemini` | `agy` | `cursor`
-- `prompt`: Standalone, self-contained task specification
-- `files`: (Optional) Key file paths to focus on
-- `timeout_seconds`: Execution timeout (default 300s, max 1800s). Returns `effective_timeout_seconds` after clamping. On `timed_out`, `summary` includes the worker output tail and `next` tells the host to resume with the same `session_id` and a larger timeout.
-- `session_id`: (Optional) Previous session ID for conversation resumption
+The root is `~/.baton` by default; set `BATON_HOME` to move it. Directories are `0700` and files `0600` (they contain prompts).
 
-**Return Status (`status`)**:
-- `success`: Task completed successfully. Contains `summary`, `session_id`, and `git_changes` (files changed, insertions, deletions).
-- `needs_decision`: Worker encountered an ambiguous choice or confirmation prompt. Returns `question`, `options`, and `session_id`. The Host presents the question to you; once you reply, the Host calls `delegate_task` **with the same `session_id`** to continue in the same session.
-- `failed` / `timed_out` / `not_installed` / `not_authenticated`: Execution halted. Returns failure details; Host halts execution.
-- `cancelled`: The host stopped the worker with `task_cancel`.
+```
+~/.baton/tasks/<task_id>/
+  meta.json          current state (atomic writes)
+  events.jsonl       uniform event stream
+  turns/<n>.json     turn n: author, input, final status, summary, git_changes
+  raw/<n>.stdout.log raw worker output for turn n, not truncated
+  raw/<n>.stderr.log
+```
 
-### Progress While the Worker Runs
-
-`delegate_task` starts the worker and returns only once that process is still alive:
-
-- `status: "running"` means the child agent is up. The payload includes `task_id`, the target, current phase (`thinking`, `executing_command`), `last_action`, `log_path`, how long it has been running, and any output already printed. `session_id` is filled only after the worker CLI prints one. Resume still uses `session_id`, not `task_id`.
-- Pass optional `reasoning_effort` (`low`, `medium`, `high`, `ultra`) to configure thinking effort per task without altering user global config.
-- A worker that exits immediately (bad login, crash on startup) returns `failed` or `not_authenticated` in that same call. It is not reported as running.
-- The same workspace can run more than one delegation at a time. The caller decides whether those tasks would write the same files. Each call returns its own `task_id`.
-- `task_wait` with a `task_id` blocks until that worker finishes, then returns the final result (`success`, `needs_decision`, `failed`, `timed_out`, `cancelled`). An already finished task returns immediately. A status file still marked `running` with no in-process task fails immediately instead of hanging. While the MCP call waits, it sends a progress notification about every 15 seconds.
-- `task_wait_any` with `task_ids` blocks until any one of the specified tasks finishes and returns that task's final result (with `task_id`). Orchestrators use this to advance jobs one by one without batch-join blocking.
-- `task_status` with a `task_id` is a peek: elapsed time, current phase (`thinking` with elapsed seconds, `executing_command`), `last_action`, `recent_events`, `log_path`, the latest output tail, `last_output_at`, and `git_changes` so far while that worker runs. Streaming JSON keeps the latest complete message; otherwise the raw stdout tail is used. When it has exited, the same call returns the final result. Without `task_id`, it follows the only live worker in this directory. If several are live, it returns `status: "running"` plus a `tasks` list (`task_id`, `target_agent`, `duration_ms`). Wait with `task_wait`. Do not poll `task_status`.
-- `task_cancel` with a `task_id` kills that process and returns `cancelled`. Without `task_id`, it cancels the only live worker. If several are live, it cancels none and returns `failed` with `task_ids`.
+Task directories are never deleted automatically; use `baton prune --older <days>`.
 
 ---
 
 ## Underlying Calling Conventions
 
-Baton handles CLI flag nuances across all supported targets:
-
-| Agent | Initial Invocation Command | Session Resumption (`--resume`) | Critical Notes |
+| Agent | First call | Resume | Notes |
 | :--- | :--- | :--- | :--- |
-| **Codex** | `codex exec --json --color never --approve-for-me --cd <cwd> -` | `codex exec resume --json <thread_id> -` | `--approve-for-me` already uses the workspace-write sandbox and conflicts with `--sandbox` on codex-cli 0.167.0. `exec resume` does not accept `--sandbox`, `--cd`, or `--color`. Never add `--ephemeral`. |
-| **Claude Code** | `claude -p --output-format json --permission-mode acceptEdits --permission-prompts none` | Appends `--resume <session_id>` | Runs in headless non-interactive mode. |
-| **Gemini** | `gemini -p <prompt> --output-format json --skip-trust --approval-mode auto_edit` | Appends `--resume <session_id>` | Skips trust prompts with auto-edit approval. |
-| **Antigravity (agy)** | `agy --print <prompt> --mode accept-edits --output-format json` | Appends `--conversation <conversation_id>` | Automatically accepts edits in print mode. |
-| **Cursor** | `agent --print --force --trust --output-format json --workspace <cwd>` | Appends `--resume <session_id>` | Prefers `cursor-agent` or `agent` CLI over IDE `cursor` executable. |
+| **Codex** | `codex exec --json --color never --approve-for-me --skip-git-repo-check --cd <cwd> -` | `codex exec resume --json <thread_id> -` | `--approve-for-me` already uses the workspace-write sandbox and conflicts with `--sandbox`; `exec resume` rejects `--cd` and `--color` |
+| **Claude Code** | `claude -p --output-format stream-json --verbose --permission-mode acceptEdits --permission-prompts none` | add `--resume <session_id>` | `stream-json` with `-p` requires `--verbose`; hook events stay out of the event stream |
+| **Cursor** | `cursor-agent --print --force --trust --output-format stream-json --workspace <cwd>` | add `--resume <session_id>` | Prefers `cursor-agent`, then `agent`; never the IDE's `cursor` |
+| **Antigravity (agy)** | `agy --print <prompt> --mode accept-edits --output-format stream-json` | add `--conversation <id>` | Replies stream as deltas; the full text comes from the final `result` |
+
+Any output line a parser does not recognize is kept as a `raw` event, never dropped. Real output samples for each CLI live in `test/fixtures/`.
 
 ---
 
-## Safety & Deadlock Prevention
+## Safety
 
-1. **Anti-Recursion Protection (`BATON_DELEGATION=1`)**: Child processes inherit `BATON_DELEGATION=1`. If a downstream agent tries to invoke Baton again, the bridge immediately rejects with `failed`, preventing infinite recursive loops (A -> B -> A).
-2. **PTY Simulation & Watchdogs**: Hardened timeout handlers prevent hung child processes when commands wait on interactive user prompts.
+1. **No recursion (`BATON_DELEGATION=1`)**: set in the worker's environment; a downstream call into baton is refused.
+2. **Process groups**: each worker runs in its own process group; timeouts and `cancel` kill the whole group, grandchildren included.
+3. **Credential redaction**: text written to events and summaries is redacted before truncation; full raw logs stay under `raw/`, protected by `0600`.
+4. **Id validation**: every task id is checked to be a UUID before it is used in a path.
 
 ---
 
 ## Manual Smoke Testing
 
-Run this quick test in an isolated Git repository:
+Use a separate throwaway Git repository:
 
-1. **Check Environment**:
+1. `baton agents`; confirm the target shows `installed: true`.
+2. Start a task that stops to ask:
    ```bash
-   node src/cli.mjs agents
+   baton start --target codex --effort low --prompt "Do not edit files. Stop and ask me: A or B, using the BATON_DECISION format, options: A | B."
    ```
-   Ensure target agent shows `"installed": true`.
-2. **Minimal Delegation**:
-   ```bash
-   node src/cli.mjs delegate --target claude --prompt "Reply with the single word pong only, do not change any file"
-   ```
-   Verify `status: "success"`, `git_changes.files_changed: 0`, and note the returned `session_id`.
-3. **Session Resumption**:
-   Resume using the returned `session_id`:
-   ```bash
-   node src/cli.mjs delegate --target claude --session <session_id> --prompt "What was the word I just told you to reply?"
-   ```
-   Verify it answers correctly from memory.
-4. **Account Ineligibility Check**:
-   If Gemini accounts have migrated to Antigravity, Gemini may return `IneligibleTierError` (`not_authenticated`). Use `agy` on such systems.
+3. In another terminal, `baton tail -f <id>` shows events live.
+4. Repeat `baton wait <id> --for 50` until it returns `needs_input` with A/B in `decision`.
+5. `baton reply <id> --as human --prompt "A. Reply with the letter, then finish with BATON_RESULT."`, wait until `success`, and check that `session_id` matches turn 1.
 
 ---
 
 ## Development & Testing
 
-Unit tests test argument construction and error states safely **without spending real model tokens**:
-
 ```bash
-# Run unit tests
-npm test
+npm test          # tsc --noEmit + node --test, no real model quota used
+npm run typecheck
 ```
 
-Test coverage includes:
-- Safe argument array construction (off-shell)
-- Resume command flag compatibility per CLI
-- Missing binaries, auth errors, timeouts, parallel delegations in one workspace, and recursive re-entry prevention
-- Git porcelain diff parsing
+Integration tests use fake CLIs in `test/fake-cli/` and a temporary `BATON_HOME`. They cover: a task finishing after its parent is killed, idle and total timeouts, cancel killing the whole group, orphan detection after the supervisor dies, needs_input → reply on the same session, bounded wait, tail, ls/prune, and reading tasks after an MCP restart. Adapter tests use real output samples from each CLI.
 
 ---
 
-Formerly **Agent-Plugin-Agent (APA)**. The old install string `apa@apa` no longer works; use `baton@agent-plugin-agent`.
+## Upgrading from 0.2.x
+
+- **Node 24 or newer.** The source is now TypeScript and runs directly as `src/cli.ts`.
+- The entry point moved from `src/cli.mjs` to `src/cli.ts`; update any hand-written MCP config.
+- The CLI drops `delegate` in favor of `start` + `wait` + `reply`; `wait` takes ids as positional arguments.
+- MCP drops `delegate_task(session_id)` continuation and `task_wait_any`: continue with `task_reply`, wait on several jobs with `task_wait(task_ids)`.
+- `needs_decision` is now `needs_input`. `timeout_seconds` (capped at 1800) is replaced by `idle_timeout_seconds` + `max_duration_seconds`, with no total cap by default.
+- Task state moved from the system temp directory to `~/.baton`.
+- **gemini is not a delegation target for now** (it could not be verified because of a local auth problem). Installing baton as an extension inside Gemini CLI as the host still works.
+
+---
+
+Formerly named **Agent-Plugin-Agent (APA)**. The old install string `apa@apa` is no longer valid; use `baton@agent-plugin-agent`.

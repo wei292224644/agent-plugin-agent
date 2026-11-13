@@ -1,0 +1,8 @@
+{"type": "thread.started", "thread_id": "thread-fake-1"}
+{"type": "item.started", "item": {"type": "command_execution", "command": "npm test"}}
+{"type": "item.completed", "item": {"type": "command_execution", "command": "npm test", "exit_code": 0, "aggregated_output": "passed"}}
+{"type": "item.started", "item": {"type": "file_change", "changes": [{"path": "a.ts", "kind": "update"}]}}
+{"type": "item.completed", "item": {"type": "file_change", "status": "completed", "changes": [{"path": "a.ts", "kind": "update"}]}}
+{"type": "item.completed", "item": {"type": "agent_message", "text": "BATON_RESULT\nsummary: ok\nBATON_END"}}
+{"type": "turn.failed", "error": {"message": "disk full"}}
+{"type": "unknown.event"}

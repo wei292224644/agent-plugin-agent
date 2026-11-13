@@ -1,16 +1,24 @@
 {
   "name": "baton",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "bin": {
-    "baton": "src/cli.mjs"
+    "baton": "src/cli.ts"
   },
   "scripts": {
-    "start": "node src/cli.mjs",
-    "test": "node --test"
+    "start": "node src/cli.ts",
+    "test": "tsc --noEmit && node --test test/setup.test.mjs \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.2"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
   }
 }

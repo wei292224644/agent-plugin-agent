@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a1d310-a52b-7410-b99d-e47cd587dbec"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n  user (~/.codex/config.toml): `features.rmcp_client` is ignored."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n  user (~/.codex/config.toml): `features.rmcp_client` is ignored."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"BATON_DECISION\nquestion: 选 A 还是 B？\noptions: A | B\nBATON_END"}}
+{"type":"turn.completed","usage":{"input_tokens":25210,"cached_input_tokens":11008,"cache_write_input_tokens":0,"output_tokens":27,"reasoning_output_tokens":0}}

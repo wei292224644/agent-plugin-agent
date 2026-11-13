@@ -1,9 +1,12 @@
+import type { GitChanges } from "./types.ts";
+type Snapshot = { porcelain: Map<string, string>; digests: Map<string, string> };
+type SnapshotInput = Snapshot | Map<string, string> | null;
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-function digestFile(cwd, filePath) {
+function digestFile(cwd: string, filePath: string) {
   try {
     const full = path.join(cwd, filePath);
     const data = fs.readFileSync(full);
@@ -13,14 +16,14 @@ function digestFile(cwd, filePath) {
   }
 }
 
-function normalizeSnapshot(snapshot) {
+function normalizeSnapshot(snapshot: SnapshotInput): Snapshot | null {
   if (!snapshot) return null;
-  if (snapshot.porcelain instanceof Map) return snapshot;
+  if (!(snapshot instanceof Map) && snapshot.porcelain instanceof Map) return snapshot;
   if (snapshot instanceof Map) return { porcelain: snapshot, digests: new Map() };
   return null;
 }
 
-export function gitSnapshot(cwd) {
+export function gitSnapshot(cwd: string): Snapshot | null {
   const result = spawnSync("git", ["status", "--porcelain", "-uall"], {
     cwd,
     encoding: "utf8",
@@ -32,7 +35,7 @@ export function gitSnapshot(cwd) {
   for (const line of result.stdout.split("\n")) {
     if (line.length < 4) continue;
     const body = line.slice(3);
-    const filePath = body.includes(" -> ") ? body.split(" -> ").pop() : body;
+    const filePath = body.includes(" -> ") ? body.split(" -> ").pop()! : body;
     porcelain.set(filePath, line);
     const digest = digestFile(cwd, filePath);
     if (digest) digests.set(filePath, digest);
@@ -40,7 +43,7 @@ export function gitSnapshot(cwd) {
   return { porcelain, digests };
 }
 
-function untrackedInsertions(cwd, filePath) {
+function untrackedInsertions(cwd: string, filePath: string) {
   try {
     const text = fs.readFileSync(path.join(cwd, filePath), "utf8");
     if (!text) return 0;
@@ -51,7 +54,7 @@ function untrackedInsertions(cwd, filePath) {
   }
 }
 
-export function gitChanges(cwd, beforeRaw, afterRaw) {
+export function gitChanges(cwd: string, beforeRaw: SnapshotInput, afterRaw: SnapshotInput): GitChanges | undefined {
   const before = normalizeSnapshot(beforeRaw);
   const after = normalizeSnapshot(afterRaw);
   if (!before || !after) return undefined;
